@@ -26,6 +26,7 @@
 - **📝 Draft Management**: Seamlessly work with both published and draft documents with visual indicators
 - **🔔 Error Handling**: Toast notifications for operation feedback and comprehensive error management
 - **↕️ Flexible Sorting**: Click column headers to sort ascending/descending with visual indicators
+- **🗂️ List Layout**: Swap the table for a plain document list (`layout: 'list'`) keeping selection and bulk actions
 
 ---
 
@@ -131,6 +132,7 @@ interface CreateBulkActionsTableConfig {
   context: ConfigContext; // Required: Sanity context with client and schema
   title?: string; // Optional: Custom title for the table view (defaults to document type)
   icon?: ComponentType | null | undefined; // Optional: Custom icon component for the navigation
+  layout?: 'table' | 'list'; // Optional: 'list' renders a document list instead of a table (defaults to 'table')
   apiVersion?: string; // Optional: API version for GROQ queries (defaults to context version)
 }
 ```
@@ -144,6 +146,7 @@ interface CreateBulkActionsTableConfig {
 | `context`    | `ConfigContext`                      | ✅ Yes   | -                    | Configuration context with client and schema       | Automatically provided by Sanity    |
 | `title`      | `string`                             | ❌ No    | Document type name   | Custom title for Studio navigation                 | `'Blog Posts'`, `'Product Catalog'` |
 | `icon`       | `ComponentType \| null \| undefined` | ❌ No    | Default table icon   | React component for navigation icon                | `DocumentIcon`, `FolderIcon`        |
+| `layout`     | `'table' \| 'list'`                  | ❌ No    | `'table'`            | `'list'` shows a plain document list with the same selection and bulk actions (no columns, no sorting). Its list item id is `<type>-list`. | `'list'`                            |
 | `apiVersion` | `string`                             | ❌ No    | Client's API version | GROQ API version for queries                       | `'2024-03-12'`, `'2023-05-03'`      |
 
 #### Type Definitions
@@ -306,10 +309,13 @@ Seamless integration with Sanity's draft system:
 
 ## Requirements
 
-- Sanity Studio v3/v4
-- React 18+
-- Node.js 16+
+- Sanity Studio v4, v5 or v6
+- React 19.2+ and React DOM 19.2+
+- styled-components v6.1+
+- Node.js 20.19+ or 22.12+
 - TypeScript (recommended)
+
+> **Note:** the package is ESM-only. Sanity Studio v3 is no longer supported — use v1.x of this plugin for v3.
 
 ---
 
@@ -317,7 +323,7 @@ Seamless integration with Sanity's draft system:
 
 This plugin is built upon the excellent foundation created by **[Rico Kahler](https://github.com/ricokahler)** with the original [Sanity Super Pane](https://github.com/ricokahler/sanity-super-pane) plugin.
 
-The original plugin provided innovative bulk action capabilities for Sanity Studio v2, but was not compatible with Sanity Studio v3/v4. This project forks and modernizes that work while maintaining the core functionality that made the original so valuable.
+The original plugin provided innovative bulk action capabilities for Sanity Studio v2, but was not compatible with later Studio versions. This project forks and modernizes that work while maintaining the core functionality that made the original so valuable.
 
 Special thanks to Rico for creating such a useful tool for the Sanity community.
 
@@ -332,6 +338,15 @@ MIT © [ContentWrap](https://contentwrap.io)
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+```sh
+pnpm install
+pnpm run lint       # oxlint
+pnpm run format     # oxfmt
+pnpm run typecheck  # tsc --noEmit
+pnpm run test       # vitest
+pnpm run build      # @sanity/pkg-utils
+```
 
 ## Issues
 
