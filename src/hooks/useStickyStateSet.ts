@@ -6,9 +6,12 @@ export function useStickyStateSet(
 ): [Set<string>, (value: Set<string>) => void] {
   const [value, setValue] = useState(() => {
     const stickyValue = window.localStorage.getItem(key);
-    return stickyValue !== null
-      ? new Set<string>(JSON.parse(stickyValue))
-      : defaultValue;
+    if (stickyValue === null) return defaultValue;
+    try {
+      return new Set<string>(JSON.parse(stickyValue));
+    } catch {
+      return defaultValue;
+    }
   });
 
   useEffect(() => {

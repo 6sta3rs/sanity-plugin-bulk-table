@@ -9,7 +9,7 @@ export interface SelectableField {
   type: string;
 }
 
-const nonSortableTypes = ['image', 'file', 'reference'];
+const nonSortableTypes = new Set(['image', 'file', 'reference']);
 
 function getInnerFields(
   childFields: ObjectField[],
@@ -29,7 +29,7 @@ function getInnerFields(
       title,
       level,
       type: field.type.name,
-      sortable: !nonSortableTypes.includes(field.type.name),
+      sortable: !nonSortableTypes.has(field.type.name),
     };
 
     if (
@@ -37,7 +37,8 @@ function getInnerFields(
       field.type.name === 'reference' ||
       field.type.name === 'image'
     ) {
-      return [...acc, child];
+      acc.push(child);
+      return acc;
     }
 
     // Check if this is an object type with nested fields
@@ -47,15 +48,17 @@ function getInnerFields(
       field.type.fields.length > 0
     ) {
       child.sortable = false;
-      const children = field.type.fields as ObjectField[];
+      const children = field.type.fields;
       const innerFields = getInnerFields(children, fieldPath, level + 1);
 
       if (innerFields.length) {
-        return [...acc, child, ...innerFields];
+        acc.push(child, ...innerFields);
+        return acc;
       }
     }
 
-    return [...acc, child];
+    acc.push(child);
+    return acc;
   }, []);
 }
 
@@ -77,7 +80,7 @@ export function getSelectableFields(
       title,
       level: 0,
       type: field.type.name,
-      sortable: !nonSortableTypes.includes(field.type.name),
+      sortable: !nonSortableTypes.has(field.type.name),
     };
 
     if (
@@ -85,7 +88,8 @@ export function getSelectableFields(
       field.type.name === 'reference' ||
       field.type.name === 'image'
     ) {
-      return [...acc, parent];
+      acc.push(parent);
+      return acc;
     }
 
     // Check if this is an object type with nested fields
@@ -95,14 +99,16 @@ export function getSelectableFields(
       field.type.fields.length > 0
     ) {
       parent.sortable = false;
-      const children = field.type.fields as ObjectField[];
+      const children = field.type.fields;
       const innerFields = getInnerFields(children, fieldPath, 1);
 
       if (innerFields.length) {
-        return [...acc, parent, ...innerFields];
+        acc.push(parent, ...innerFields);
+        return acc;
       }
     }
 
-    return [...acc, parent];
+    acc.push(parent);
+    return acc;
   }, []);
 }

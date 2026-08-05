@@ -43,10 +43,8 @@ export function logError(error: unknown, context?: string): void {
       'documentIds' in error && { documentIds: error.documentIds }),
   };
 
-  // For development/debugging
-  if (process.env.NODE_ENV === 'development') {
-    console.error('[Sanity Bulk Actions Table Plugin] Error:', errorInfo);
-  }
+  // Always log — silent failures in production hide broken data fetches from users
+  console.error('[Sanity Bulk Actions Table Plugin] Error:', errorInfo);
 
   // In production, you might want to send this to an external service
   // Example: sendToLogService(errorInfo);

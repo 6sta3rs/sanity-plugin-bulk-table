@@ -12,7 +12,12 @@ export function useStickyStateOrder(
 ): [ColumnOrder, (value: ColumnOrder) => void] {
   const [value, setValue] = useState(() => {
     const stickyValue = window.localStorage.getItem(key);
-    return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
+    if (stickyValue === null) return defaultValue;
+    try {
+      return JSON.parse(stickyValue);
+    } catch {
+      return defaultValue;
+    }
   });
 
   useEffect(() => {
