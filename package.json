@@ -1,12 +1,12 @@
 {
-  "name": "sanity-plugin-bulk-actions-table",
-  "version": "1.0.4",
-  "description": "A powerful table view plugin for Sanity Studio v3/v4 with bulk actions, column selection, and document management capabilities",
+  "name": "sanity-plugin-bulk-table",
+  "version": "2.0.0",
+  "description": "A powerful table view plugin for Sanity Studio v4/v5/v6 with bulk actions, column selection, and document management capabilities",
   "keywords": [
     "sanity",
     "sanity-plugin",
     "sanity-studio",
-    "sanity-v3",
+    "sanity-v6",
     "sanity-bulk-actions",
     "sanity-table-view",
     "sanity-document-management",
@@ -14,14 +14,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/contentwrap/sanity-plugin-bulk-actions-table.git"
+    "url": "git+https://github.com/0x6Star3s/sanity-plugin-bulk-table.git"
   },
-  "homepage": "https://github.com/contentwrap/sanity-plugin-bulk-actions-table#readme",
+  "homepage": "https://github.com/0x6Star3s/sanity-plugin-bulk-table#readme",
   "bugs": {
-    "url": "https://github.com/contentwrap/sanity-plugin-bulk-actions-table/issues"
+    "url": "https://github.com/0x6Star3s/sanity-plugin-bulk-table/issues"
   },
   "license": "MIT",
-  "author": "ContentWrap <tamba@contentwrap.io>",
+  "author": "0x6Star3s <pawel.stach81@gmail.com>",
   "sideEffects": false,
   "type": "module",
   "scripts": {

@@ -1,13 +1,13 @@
 <div align="center">
   <h1>Sanity Bulk Actions Table Plugin</h1>
   <h3>A powerful table view with bulk actions for managing Sanity documents</h3>
-  <p><em>Developed and maintained by <a href="https://contentwrap.io" target="_blank">ContentWrap</a></em></p>
-  <p><em>Forked from <a href="https://github.com/ricokahler/sanity-super-pane" target="_blank">Sanity Super Pane</a></em></p>
+  <p><em>Maintained by <a href="https://github.com/0x6Star3s" target="_blank">0x6Star3s</a></em></p>
+  <p><em>Based on <a href="https://github.com/contentwrap/sanity-plugin-bulk-actions-table" target="_blank">ContentWrap's plugin</a>, itself forked from <a href="https://github.com/ricokahler/sanity-super-pane" target="_blank">Sanity Super Pane</a></em></p>
 
-  <img src="https://img.shields.io/npm/v/sanity-plugin-bulk-actions-table" alt="Sanity Bulk Actions Table" />
+  <img src="https://img.shields.io/npm/v/sanity-plugin-bulk-table" alt="Sanity Bulk Actions Table" />
   <img src="https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Sanity-F03E2F?logo=sanity&logoColor=white" alt="Sanity" />
-  <img src="https://img.shields.io/npm/l/sanity-plugin-bulk-actions-table?style&color=5D6D7E" alt="GitHub license" />
+  <img src="https://img.shields.io/npm/l/sanity-plugin-bulk-table?style&color=5D6D7E" alt="GitHub license" />
 
   <br>
   <br>
@@ -33,11 +33,11 @@
 ## Installation
 
 ```sh
-npm install sanity-plugin-bulk-actions-table
+npm install sanity-plugin-bulk-table
 # or
-yarn add sanity-plugin-bulk-actions-table
+yarn add sanity-plugin-bulk-table
 # or
-pnpm add sanity-plugin-bulk-actions-table
+pnpm add sanity-plugin-bulk-table
 ```
 
 ---
@@ -54,7 +54,7 @@ Add the bulk actions table to your `sanity.config.ts` file using the structure c
 
 ```typescript
 import { defineConfig } from 'sanity';
-import { createBulkActionsTable } from 'sanity-plugin-bulk-actions-table';
+import { createBulkActionsTable } from 'sanity-plugin-bulk-table';
 import { structureTool } from 'sanity/structure';
 
 export default defineConfig({
@@ -104,7 +104,7 @@ export default defineConfig({
 
 ```typescript
 // structure.ts
-import { createBulkActionsTable } from 'sanity-plugin-bulk-actions-table';
+import { createBulkActionsTable } from 'sanity-plugin-bulk-table';
 import type { StructureResolver } from 'sanity/structure';
 
 export const structure: StructureResolver = (S, context) =>
@@ -154,7 +154,7 @@ interface CreateBulkActionsTableConfig {
 For TypeScript users, you can import the configuration interface:
 
 ```typescript
-import { CreateBulkActionsTableConfig } from 'sanity-plugin-bulk-actions-table';
+import { CreateBulkActionsTableConfig } from 'sanity-plugin-bulk-table';
 ```
 
 ### Example with Multiple Document Types
@@ -331,7 +331,7 @@ Special thanks to Rico for creating such a useful tool for the Sanity community.
 
 ## License
 
-MIT © [ContentWrap](https://contentwrap.io)
+MIT — see [LICENSE](LICENSE) for the full attribution chain.
 
 ---
 
@@ -350,4 +350,4 @@ pnpm run build      # @sanity/pkg-utils
 
 ## Issues
 
-If you encounter any issues, please report them on [GitHub Issues](https://github.com/contentwrap/sanity-plugin-bulk-actions-table/issues).
+If you encounter any issues, please report them on [GitHub Issues](https://github.com/0x6Star3s/sanity-plugin-bulk-table/issues).
