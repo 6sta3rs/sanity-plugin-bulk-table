@@ -10,15 +10,17 @@ export default defineConfig({
   // Bundle optimizations
   minify: true,
 
-  // External dependencies (don't bundle these)
-  external: [
-    'react',
-    'react-dom',
-    'sanity',
-    '@sanity/ui',
-    '@sanity/icons',
-    'styled-components',
-  ],
+  // Never bundle these — they are resolved from the host Studio
+  deps: {
+    neverBundle: [
+      'react',
+      'react-dom',
+      'sanity',
+      '@sanity/ui',
+      '@sanity/icons',
+      'styled-components',
+    ],
+  },
 
   // Tree shaking is enabled by default in modern bundlers
 });
