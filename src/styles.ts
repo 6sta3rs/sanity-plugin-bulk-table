@@ -1,10 +1,28 @@
-import { SpinnerIcon } from '@sanity/icons';
+import { SpinnerIcon } from '@sanity/icons/Spinner';
 import { Badge } from '@sanity/ui';
 import styled, { css, keyframes } from 'styled-components';
 
 import { CellPrimitive, TablePrimitive } from './table/primitives';
 
 export const COLUMN_SELECTOR_WIDTH = '41px';
+export const LIST_STATUS_WIDTH = '28px';
+
+// List layout matches Sanity's own document list: a dot on the right edge
+// instead of a badge, so the title keeps the full pane width.
+export const StatusDot = styled.span<{
+  $tone: 'positive' | 'caution' | 'primary';
+}>((props: any) => {
+  const { theme, $tone } = props;
+
+  return css`
+    display: block;
+    margin-left: auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: ${theme.sanity.color.muted[$tone].enabled.fg};
+  `;
+});
 
 export const Container = styled.div`
   height: 100%;
@@ -33,10 +51,10 @@ export const StatusBadge = styled(Badge)`
   }
 `;
 
-export const TableWrapper = styled.div<{ hasResults: boolean }>`
+export const TableWrapper = styled.div<{ $hasResults: boolean }>`
   container-type: inline-size;
-  ${({ hasResults }) =>
-    hasResults
+  ${({ $hasResults }) =>
+    $hasResults
       ? css`
           overflow: auto;
           position: relative;
@@ -89,9 +107,16 @@ export const LoadingSpinner = styled(SpinnerIcon)`
   width: 32px;
   height: 32px;
   animation: ${spin} 1500ms linear infinite;
+
+  /* The overlay stays mounted so it can fade out, but a hidden spinner must
+     not keep animating — an idle pane would otherwise run a rotation forever. */
+  ${LoadingOverlay}:not(.active) & {
+    animation-play-state: paused;
+  }
 `;
 
-export const Table = styled(TablePrimitive)(({ theme }: { theme: any }) => {
+export const Table = styled(TablePrimitive)<{ $list?: boolean }>((props: any) => {
+  const { theme, $list } = props;
   const { color } = theme.sanity;
   const borderColor = color.selectable.default.enabled.border;
 
@@ -216,6 +241,27 @@ export const Table = styled(TablePrimitive)(({ theme }: { theme: any }) => {
       padding: 0 0.5rem;
       border-bottom: 1px solid ${borderColor};
     }
+
+    /* List layout: no dense-table typography, roomier rows. */
+    ${$list &&
+    css`
+      .preview-root {
+        padding: 0.25rem 0;
+        margin-right: 0;
+      }
+
+      .preview-title {
+        font-size: inherit;
+      }
+
+      .preview-subtitle {
+        font-size: inherit;
+      }
+
+      td {
+        padding: 0.25rem 0.5rem;
+      }
+    `}
   `;
 });
 

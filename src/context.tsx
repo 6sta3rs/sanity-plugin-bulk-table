@@ -4,6 +4,7 @@ import {
   SetStateAction,
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -15,26 +16,71 @@ import { useStickyStateSet } from './hooks/useStickyStateSet';
 import usePaginatedClient, { PaginatedClient } from './usePaginatedClient';
 import { sanitizeGroqInput } from './utils/sanitization';
 
-const BulkActionsTableContext = createContext({
-  options: {} as Options,
-  schemaType: {} as SchemaType,
+interface BulkActionsTableContextValue {
+  options: Options;
+  schemaType: SchemaType;
+  pageSize: number;
+  setPageSize: (num: number) => void;
+  selectedColumns: Set<string>;
+  setSelectedColumns: (set: Set<string>) => void;
+  orderColumn: ColumnOrder;
+  setOrderColumn: (obj: ColumnOrder) => void;
+  selectedIds: Set<string>;
+  setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
+  isSelectState: boolean;
+  setIsSelectState: (bool: boolean) => void;
+  paginatedClient: PaginatedClient;
+}
+
+// No fake default object: every real field (Options/SchemaType/PaginatedClient)
+// is either sourced from Sanity's dynamic schema API or a hook return type that
+// can't be honestly stubbed out without a full mock implementation. `null` is
+// the honest default; the hook below throws if it's ever read outside the
+// Provider (which never happens in this plugin's component tree).
+const BulkActionsTableContext =
+  createContext<BulkActionsTableContextValue | null>(null);
+
+export const useBulkActionsTableContext = () => {
+  const value = useContext(BulkActionsTableContext);
+  if (!value) {
+    throw new Error(
+      'useBulkActionsTableContext must be used within a BulkActionsTableProvider',
+    );
+  }
+  return value;
+};
+
+// Kept out of BulkActionsTableContext on purpose: searchValue changes on
+// every keystroke, and that context's `contextValue` is read by the whole
+// table (including every row's <Preview>). A dedicated context means only
+// the components that actually read searchValue (SearchField, NoResultsState)
+// re-render while typing.
+interface SearchContextValue {
+  searchValue: string;
+  setSearchValue: (searchValue: string) => void;
+}
+
+// Explicit generic (rather than casting the no-op default's setter) so the
+// context's real type always requires the 1-arg setter SearchProvider
+// actually supplies -- the no-op below only needs to satisfy that shape, not
+// literally declare a matching parameter.
+const SearchContext = createContext<SearchContextValue>({
   searchValue: '',
-  setSearchValue: (searchValue: string) => {},
-  pageSize: rowsPerPage[0],
-  setPageSize: (num: number) => {},
-  selectedColumns: new Set<string>(),
-  setSelectedColumns: (set: Set<string>) => {},
-  orderColumn: orderColumnDefault as ColumnOrder,
-  setOrderColumn: (obj: ColumnOrder) => {},
-  selectedIds: new Set<string>(),
-  setSelectedIds: (() => {}) as Dispatch<SetStateAction<Set<string>>>,
-  isSelectState: false,
-  setIsSelectState: (bool: boolean) => {},
-  paginatedClient: {} as PaginatedClient,
+  setSearchValue: () => {},
 });
 
-export const useBulkActionsTableContext = () =>
-  useContext(BulkActionsTableContext);
+export const useSearchContext = () => useContext(SearchContext);
+
+export const SearchProvider = ({ children }: { children: ReactNode }) => {
+  const [searchValue, setSearchValue] = useState('');
+  const value = useMemo(
+    () => ({ searchValue, setSearchValue }),
+    [searchValue],
+  );
+  return (
+    <SearchContext.Provider value={value}>{children}</SearchContext.Provider>
+  );
+};
 
 export const BulkActionsTableProvider = ({
   options,
@@ -44,12 +90,14 @@ export const BulkActionsTableProvider = ({
   children: ReactNode;
 }) => {
   const { type, schema, client } = options;
-  const schemaType = useMemo(
-    () => schema.get(type) as SchemaType,
-    [type, schema],
-  );
+  const schemaType = useMemo(() => {
+    const resolved = schema.get(type);
+    if (!resolved) {
+      throw new Error(`Unknown schema type: "${type}"`);
+    }
+    return resolved;
+  }, [type, schema]);
 
-  const [searchValue, setSearchValue] = useState('');
   const [pageSize, setPageSize] = useState(rowsPerPage[0]);
   const [selectedColumns, setSelectedColumns] = useStickyStateSet(
     new Set<string>(),
@@ -66,7 +114,7 @@ export const BulkActionsTableProvider = ({
     () =>
       ('fields' in schemaType ? schemaType.fields : []).reduce(
         (agg, field: ObjectField) => {
-          const name = field.name as string;
+          const name = field.name;
 
           // Validate field name for security
           if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
@@ -113,23 +161,43 @@ export const BulkActionsTableProvider = ({
     client,
   });
 
-  const contextValue = {
-    options,
-    schemaType,
-    searchValue,
-    setSearchValue,
-    pageSize,
-    setPageSize,
-    selectedColumns,
-    setSelectedColumns,
-    orderColumn,
-    setOrderColumn,
-    selectedIds,
-    setSelectedIds,
-    isSelectState,
-    setIsSelectState,
-    paginatedClient,
-  };
+  // Wire up the Studio menu's "Refresh" action (options.refresh) to the
+  // paginated client's own refresh — nothing else subscribes to that emitter.
+  const { refresh: refreshClient } = paginatedClient;
+  useEffect(
+    () => options.refresh.subscribe(refreshClient),
+    [options.refresh, refreshClient],
+  );
+
+  const contextValue = useMemo(
+    () => ({
+      options,
+      schemaType,
+      pageSize,
+      setPageSize,
+      selectedColumns,
+      setSelectedColumns,
+      orderColumn,
+      setOrderColumn,
+      selectedIds,
+      setSelectedIds,
+      isSelectState,
+      setIsSelectState,
+      paginatedClient,
+    }),
+    [
+      options,
+      schemaType,
+      pageSize,
+      selectedColumns,
+      setSelectedColumns,
+      orderColumn,
+      setOrderColumn,
+      selectedIds,
+      isSelectState,
+      paginatedClient,
+    ],
+  );
 
   return (
     <BulkActionsTableContext.Provider value={contextValue}>

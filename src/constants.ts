@@ -9,6 +9,7 @@ export const orderColumnDefault = { key: '', direction: 'asc', type: null };
 export interface Options {
   type: string;
   title?: string;
+  layout: 'table' | 'list';
   schema: Schema;
   client: SanityClient;
   refresh: Emitter;

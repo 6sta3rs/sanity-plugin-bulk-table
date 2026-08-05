@@ -1,4 +1,5 @@
-import { CheckmarkIcon, ControlsIcon } from '@sanity/icons';
+import { CheckmarkIcon } from '@sanity/icons/Checkmark';
+import { ControlsIcon } from '@sanity/icons/Controls';
 import {
   Box,
   Button,
@@ -91,9 +92,7 @@ function ColumnSelector({
 }: Props) {
   const selectableFields = useMemo(
     () =>
-      getSelectableFields(
-        'fields' in schemaType ? (schemaType.fields as any[]) : [],
-      ),
+      getSelectableFields('fields' in schemaType ? schemaType.fields : []),
     [schemaType],
   );
 

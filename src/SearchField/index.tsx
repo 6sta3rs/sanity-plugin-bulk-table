@@ -1,38 +1,32 @@
-import { SearchIcon } from '@sanity/icons';
+import { SearchIcon } from '@sanity/icons/Search';
 import { TextInput } from '@sanity/ui';
-import debounce from 'lodash.debounce';
-import { useCallback, useEffect } from 'react';
+import { useEffect } from 'react';
 import styled from 'styled-components';
 
-import { useBulkActionsTableContext } from '../context';
-import { isValidSearchQuery, sanitizeGroqInput } from '../utils/sanitization';
+import { useBulkActionsTableContext, useSearchContext } from '../context';
+import { sanitizeGroqInput } from '../utils/sanitization';
 
 const SearchForm = styled.form`
   display: flex;
   gap: 0.5rem;
 `;
 
+const DEBOUNCE_MS = 200;
+
 function SearchField() {
-  const { paginatedClient, searchValue, setSearchValue } =
-    useBulkActionsTableContext();
+  const { paginatedClient } = useBulkActionsTableContext();
+  const { searchValue, setSearchValue } = useSearchContext();
 
-  const debouncedOnSearch = useCallback(
-    debounce((query: string) => {
-      // Validate and sanitize the search query before sending it
-      if (isValidSearchQuery(query) || query.length === 0) {
-        const sanitizedQuery = sanitizeGroqInput(query);
-        paginatedClient.setUserQuery(sanitizedQuery);
-      }
-    }, 200),
-    [paginatedClient.setUserQuery],
-  );
-
+  const { setUserQuery } = paginatedClient;
   useEffect(() => {
-    debouncedOnSearch(searchValue);
-    return () => {
-      debouncedOnSearch.cancel();
-    };
-  }, [searchValue, debouncedOnSearch]);
+    const timeout = setTimeout(() => {
+      // sanitizeGroqInput already strips everything unsafe for the `match "…*"`
+      // literal it's used in, so there's nothing left to reject — just pass it through.
+      setUserQuery(sanitizeGroqInput(searchValue));
+    }, DEBOUNCE_MS);
+
+    return () => clearTimeout(timeout);
+  }, [searchValue, setUserQuery]);
 
   return (
     <SearchForm onSubmit={(e) => e.preventDefault()}>

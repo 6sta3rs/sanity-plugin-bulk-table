@@ -1,10 +1,9 @@
-import {
-  ChevronDownIcon,
-  PublishIcon,
-  ResetIcon,
-  TrashIcon,
-  UnpublishIcon,
-} from '@sanity/icons';
+import { DocumentId, getDraftId, getPublishedId } from '@sanity/id-utils';
+import ChevronDownIcon from '@sanity/icons/ChevronDown';
+import PublishIcon from '@sanity/icons/Publish';
+import ResetIcon from '@sanity/icons/Reset';
+import TrashIcon from '@sanity/icons/Trash';
+import UnpublishIcon from '@sanity/icons/Unpublish';
 import {
   Button,
   Dialog,
@@ -14,9 +13,7 @@ import {
   MenuItem,
   useToast,
 } from '@sanity/ui';
-import { nanoid } from 'nanoid';
-import { useMemo, useState } from 'react';
-import { ErrorBoundary } from 'react-error-boundary';
+import { Component, ReactNode, useId, useState } from 'react';
 import { Preview } from 'sanity';
 import styled from 'styled-components';
 
@@ -40,9 +37,34 @@ interface Props {
   onDelete: () => void;
 }
 
+// Renders nothing if a child throws — this only guards the document previews
+// inside an error toast, where a second crash must not take down the pane.
+// @sanity/ui's ErrorBoundary is @beta ("DO NOT USE IN PRODUCTION") and renders
+// the error message instead of nothing, so it is not usable here.
+class SilentErrorBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 const ErroredDocuments = ({ e, schemaType }: { e: any; schemaType: any }) => {
+  // ponytail: Actions API error shape isn't confirmed to carry per-document ids
+  // the way the old Mutations API's `details.items[].error.id` did (the typed
+  // ActionErrorItem only guarantees `index` + `error.type`/`description`).
+  // Read defensively and fall back to an empty list rather than throwing.
   const idsWithErrors: string[] =
-    'details' in e ? e.details.items.map((item: any) => item.error.id) : [];
+    e?.details?.items
+      ?.map((item: any) => item?.error?.id)
+      .filter((id: unknown): id is string => typeof id === 'string') ?? [];
 
   if (!idsWithErrors.length) {
     return null;
@@ -51,7 +73,7 @@ const ErroredDocuments = ({ e, schemaType }: { e: any; schemaType: any }) => {
   const plural = idsWithErrors.length !== 1;
 
   return (
-    <ErrorBoundary fallback={null}>
+    <SilentErrorBoundary>
       <p>
         Please unselect {plural ? 'these' : 'this'} document{plural ? 's' : ''}{' '}
         and try again:
@@ -66,12 +88,9 @@ const ErroredDocuments = ({ e, schemaType }: { e: any; schemaType: any }) => {
           />
         ))}
       </p>
-    </ErrorBoundary>
+    </SilentErrorBoundary>
   );
 };
-
-const removeDraftPrefix = (s: string) =>
-  s.startsWith('drafts.') ? s.substring('drafts.'.length) : s;
 
 function BulkActionsMenu({ onDelete }: Props) {
   const {
@@ -81,9 +100,9 @@ function BulkActionsMenu({ onDelete }: Props) {
     schemaType,
   } = useBulkActionsTableContext();
 
-  const buttonId = useMemo(nanoid, []);
+  const buttonId = useId();
   const toast = useToast();
-  const dialogId = useMemo(nanoid, []);
+  const dialogId = useId();
   const [dialogMode, setDialogMode] = useState<
     'discard_changes' | 'unpublish' | 'publish' | 'delete' | null
   >(null);
@@ -94,9 +113,10 @@ function BulkActionsMenu({ onDelete }: Props) {
 
     try {
       const ids = await client.fetch<string[]>('*[_id in $ids]._id', {
-        ids: Array.from(selectedIds)
-          .map((id) => [id, `drafts.${id}`])
-          .flat(),
+        ids: Array.from(selectedIds).flatMap((id) => [
+          id,
+          getDraftId(DocumentId(id)),
+        ]),
       });
 
       const idSet = ids.reduce((set, id) => {
@@ -109,13 +129,14 @@ function BulkActionsMenu({ onDelete }: Props) {
           id.startsWith('drafts.') && idSet.has(id.substring('drafts.'.length)),
       );
 
-      const t = client.transaction();
-
-      for (const id of draftIdsThatAlsoHavePublishedIds) {
-        t.delete(id);
+      if (draftIdsThatAlsoHavePublishedIds.length) {
+        await client.action(
+          draftIdsThatAlsoHavePublishedIds.map((versionId) => ({
+            actionType: 'sanity.action.document.version.discard' as const,
+            versionId,
+          })),
+        );
       }
-
-      await t.commit();
 
       toast.push({
         title: 'Changes Discarded',
@@ -125,8 +146,6 @@ function BulkActionsMenu({ onDelete }: Props) {
         duration: 10 * 1000,
       });
       setSelectedIds(new Set());
-
-      setDialogMode(null);
     } catch (e) {
       handleBulkOperationError(e, 'discard changes', Array.from(selectedIds));
 
@@ -143,6 +162,7 @@ function BulkActionsMenu({ onDelete }: Props) {
         duration: 30 * 1000,
       });
     } finally {
+      setDialogMode(null);
       setLoading(false);
     }
   };
@@ -151,22 +171,24 @@ function BulkActionsMenu({ onDelete }: Props) {
     setLoading(true);
 
     try {
-      const publishedDocuments = await client.fetch<any[]>('*[_id in $ids]', {
+      const publishedIds = await client.fetch<string[]>('*[_id in $ids]._id', {
         ids: Array.from(selectedIds),
       });
 
-      const t = client.transaction();
-
-      for (const publishedDocument of publishedDocuments) {
-        t.createIfNotExists({
-          ...publishedDocument,
-          _id: `drafts.${publishedDocument._id}`,
-          _updatedAt: new Date().toISOString(),
-        });
-        t.delete(publishedDocument._id);
+      if (publishedIds.length) {
+        // sanity.action.document.unpublish moves the published document's
+        // content into the draft only if a draft doesn't already exist,
+        // instead of the old createIfNotExists-then-delete pair, which
+        // silently dropped published content whenever a draft was already
+        // staged.
+        await client.action(
+          publishedIds.map((publishedId) => ({
+            actionType: 'sanity.action.document.unpublish' as const,
+            draftId: getDraftId(DocumentId(publishedId)),
+            publishedId: getPublishedId(DocumentId(publishedId)),
+          })),
+        );
       }
-
-      await t.commit();
 
       toast.push({
         title: 'Unpublish Successful',
@@ -205,22 +227,19 @@ function BulkActionsMenu({ onDelete }: Props) {
     setLoading(true);
 
     try {
-      const draftDocuments = await client.fetch<any[]>('*[_id in $ids]', {
-        ids: Array.from(selectedIds).map((id) => `drafts.${id}`),
+      const draftIds = await client.fetch<string[]>('*[_id in $ids]._id', {
+        ids: Array.from(selectedIds).map((id) => getDraftId(DocumentId(id))),
       });
 
-      const t = client.transaction();
-
-      for (const draftDocument of draftDocuments) {
-        t.createOrReplace({
-          ...draftDocument,
-          _id: removeDraftPrefix(draftDocument._id),
-          _updatedAt: new Date().toISOString(),
-        });
-        t.delete(draftDocument._id);
+      if (draftIds.length) {
+        await client.action(
+          draftIds.map((draftId) => ({
+            actionType: 'sanity.action.document.publish' as const,
+            draftId,
+            publishedId: getPublishedId(DocumentId(draftId)),
+          })),
+        );
       }
-
-      await t.commit();
 
       toast.push({
         title: 'Publish Successful',
@@ -255,19 +274,16 @@ function BulkActionsMenu({ onDelete }: Props) {
     setLoading(true);
 
     try {
-      const idsToDelete = await client.fetch<string[]>('*[_id in $ids]._id', {
-        ids: Array.from(selectedIds)
-          .map((id) => [id, `drafts.${id}`])
-          .flat(),
-      });
-
-      const t = client.transaction();
-
-      for (const id of idsToDelete) {
-        t.delete(id);
-      }
-
-      await t.commit();
+      // sanity.action.document.delete errors if a draft exists that isn't
+      // listed in includeDrafts, but is otherwise a no-op for ids that don't
+      // exist, so no existence pre-check is needed here.
+      await client.action(
+        Array.from(selectedIds).map((id) => ({
+          actionType: 'sanity.action.document.delete' as const,
+          publishedId: getPublishedId(DocumentId(id)),
+          includeDrafts: [getDraftId(DocumentId(id))],
+        })),
+      );
 
       toast.push({
         title: 'Delete Successful',
@@ -309,7 +325,7 @@ function BulkActionsMenu({ onDelete }: Props) {
         id={buttonId}
         button={
           <Button
-            space={2}
+            gap={2}
             fontSize={1}
             padding={2}
             text="Update items"

@@ -1,115 +1,85 @@
-import { Card, CardProps } from '@sanity/ui';
-import { PropsWithChildren, forwardRef } from 'react';
 import styled, { css } from 'styled-components';
 
+type Tone = 'default' | 'primary';
+
+interface SelectableStateColors {
+  bg: string;
+  fg: string;
+}
+
+// styled-components' `theme` prop is untyped (`DefaultTheme` is an empty,
+// augmentable interface) unless globally augmented -- and @sanity/ui's own
+// `Theme`/`ThemeColor` types for this (the `sanity.color` shape actually
+// supplied by @sanity/ui's <ThemeProvider>) are themselves marked
+// `@deprecated` in favor of a differently-shaped `v2.color`, so reusing them
+// here would just trade one lint error for another. This is the minimal
+// shape this file actually reads off `theme.sanity.color`.
+interface SelectableThemeColor {
+  sanity: {
+    color: {
+      selectable: Record<
+        Tone,
+        {
+          enabled: SelectableStateColors;
+          hovered: SelectableStateColors;
+          selected: SelectableStateColors;
+        }
+      >;
+    };
+  };
+}
+
 // Table
-const TableWrapper = forwardRef<HTMLDivElement, CardProps>(
-  (props = {}, ref) => <Card as="table" ref={ref} {...props} />,
-);
+export const TablePrimitive = styled.table`
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 
-const StyledTable = styled(TableWrapper)(
-  () => css`
+  &:not([hidden]) {
     display: table;
-    width: 100%;
     border-collapse: collapse;
-    table-layout: fixed;
+  }
+`;
 
-    &:not([hidden]) {
-      display: table;
-      border-collapse: collapse;
-    }
-  `,
-);
+// Table head
+export const TableHeadPrimitive = styled.thead`
+  display: table-header-group;
 
-type TableProps = PropsWithChildren<CardProps>;
+  &:not([hidden]) {
+    display: table-header-group;
+  }
+`;
 
-export const TablePrimitive = forwardRef<HTMLDivElement, TableProps>(
-  (props, ref) => {
-    const { children, ...rest } = props;
-    return (
-      <StyledTable ref={ref} {...rest}>
-        {children}
-      </StyledTable>
-    );
+// Row
+export const RowPrimitive = styled.tr<{ $tone?: Tone; $selected?: boolean }>(
+  ({ theme, $tone = 'default', $selected }) => {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SelectableThemeColor above: styled-components' theme is untyped by default, and @sanity/ui's own typed alternative for this shape is deprecated.
+    const { selectable } = (theme as SelectableThemeColor).sanity.color;
+    const colors = $selected ? selectable[$tone].selected : selectable[$tone].enabled;
+
+    return css`
+      display: table-row;
+      background-color: ${colors.bg};
+      color: ${colors.fg};
+
+      &:hover {
+        background-color: ${selectable[$tone].hovered.bg};
+        cursor: pointer;
+      }
+
+      &:not([hidden]) {
+        display: table-row;
+      }
+    `;
   },
 );
 
-// Row
-const RowWrapper = (props: CardProps = {}) => {
-  return <Card as="tr" {...props} />;
-};
-
-const StyledRow = styled(RowWrapper)(
-  () => css`
-    display: table-row;
-
-    &:not([hidden]) {
-      display: table-row;
-    }
-  `,
-);
-
-type TableRowProps = PropsWithChildren<
-  CardProps & {
-    onClick?: (e: React.MouseEvent) => void;
-    selected?: boolean;
-  }
->;
-
-export function RowPrimitive(props: TableRowProps) {
-  const { children, ...rest } = props;
-
-  return <StyledRow {...rest}>{children}</StyledRow>;
-}
-
 // Cell
-const CellWrapper = ({ as, ...props }: { as?: string } & CardProps) => {
-  return <Card as={as || 'td'} {...props} />;
-};
+export const CellPrimitive = styled.td`
+  display: table-cell;
 
-const StyledCell = styled(CellWrapper)(
-  () => css`
+  &:not([hidden]) {
     display: table-cell;
-
-    &:not([hidden]) {
-      display: table-cell;
-    }
-  `,
-);
-
-type TableCellProps = PropsWithChildren<
-  CardProps & {
-    colSpan?: number;
-    rowSpan?: number;
-    className?: string;
-    style?: React.CSSProperties;
   }
->;
-
-export function CellPrimitive(props: TableCellProps) {
-  const { children, ...rest } = props;
-
-  return <StyledCell {...rest}>{children}</StyledCell>;
-}
-
-const TableHeadWrapper = (props: CardProps = {}) => {
-  return <Card as="thead" {...props} />;
-};
-
-const StyledTableHead = styled(TableHeadWrapper)(
-  () => css`
-    display: table-header-group;
-
-    &:not([hidden]) {
-      display: table-header-group;
-    }
-  `,
-);
-
-type TableHeaderProps = PropsWithChildren<CardProps>;
-
-export function TableHeadPrimitive(props: TableHeaderProps) {
-  const { children, ...rest } = props;
-
-  return <StyledTableHead {...rest}>{children}</StyledTableHead>;
-}
+`;

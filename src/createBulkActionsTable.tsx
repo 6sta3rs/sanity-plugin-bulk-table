@@ -1,11 +1,9 @@
-import {
-  AddIcon,
-  CheckmarkIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  FolderIcon,
-  SyncIcon,
-} from '@sanity/icons';
+import { AddIcon } from '@sanity/icons/Add';
+import { CheckmarkIcon } from '@sanity/icons/Checkmark';
+import { ChevronLeftIcon } from '@sanity/icons/ChevronLeft';
+import { ChevronRightIcon } from '@sanity/icons/ChevronRight';
+import { FolderIcon } from '@sanity/icons/Folder';
+import { SyncIcon } from '@sanity/icons/Sync';
 import {
   Box,
   Button,
@@ -15,16 +13,11 @@ import {
   Label,
   Select,
   Text,
-  ThemeProvider,
   ToastProvider,
   Tooltip,
 } from '@sanity/ui';
-import { buildTheme } from '@sanity/ui/theme';
-import classNames from 'classnames';
-import get from 'lodash.get';
-import pluralize, { singular } from 'pluralize';
-import { useMemo, useRef } from 'react';
-import { Preview } from 'sanity';
+import { memo, useCallback, useMemo, useRef } from 'react';
+import { Preview, SchemaType } from 'sanity';
 import { ListItem, usePaneRouter } from 'sanity/structure';
 
 import BulkActionsMenu from './BulkActionsMenu';
@@ -38,7 +31,9 @@ import {
 } from './constants';
 import {
   BulkActionsTableProvider,
+  SearchProvider,
   useBulkActionsTableContext,
+  useSearchContext,
 } from './context';
 import createEmitter from './createEmitter';
 import {
@@ -47,6 +42,7 @@ import {
 } from './helpers/getSelectableFields';
 import {
   COLUMN_SELECTOR_WIDTH,
+  LIST_STATUS_WIDTH,
   CheckboxCellTd,
   CheckboxCellTh,
   CheckboxFacade,
@@ -57,6 +53,7 @@ import {
   LoadingOverlay,
   LoadingSpinner,
   StatusBadge,
+  StatusDot,
   Table as StyledTable,
   TableWrapper,
 } from './styles';
@@ -67,10 +64,14 @@ import {
   RowPrimitive,
   TableHeadPrimitive,
 } from './table/primitives';
-import { CreateBulkActionsTableConfig } from './types';
+import { CreateBulkActionsTableConfig, TableField } from './types';
+import { PaginatedClient } from './usePaginatedClient';
 
-function parentHasClass(el: HTMLElement | null, className: string): boolean {
-  if (!el) return false;
+function parentHasClass(
+  el: EventTarget | Element | null,
+  className: string,
+): boolean {
+  if (!(el instanceof Element)) return false;
   if (el.classList.contains(className)) return true;
   return parentHasClass(el.parentElement, className);
 }
@@ -78,18 +79,6 @@ function parentHasClass(el: HTMLElement | null, className: string): boolean {
 interface BulkActionsTableProps {
   options: Options;
 }
-
-// Type for fields that can be either real SelectableField or mock fields for built-in columns
-type TableField =
-  | SelectableField
-  | {
-      fieldPath: string;
-      title: string | undefined;
-      level: number;
-      sortable: boolean;
-      type: string;
-      field: { type: { name: string } };
-    };
 
 const nonSchemaFields = defaultDatetimeFields.map(
   ({ key, title, sortable }) => ({
@@ -105,11 +94,10 @@ const nonSchemaFields = defaultDatetimeFields.map(
 const ActionRow = () => {
   const { navigateIntent } = usePaneRouter();
   const {
-    options: { type, client },
+    options: { type },
     selectedIds,
     setSelectedIds,
     paginatedClient,
-    schemaType,
     isSelectState,
     setIsSelectState,
   } = useBulkActionsTableContext();
@@ -176,7 +164,7 @@ const ActionRow = () => {
               portal
             >
               <Button
-                space={2}
+                gap={2}
                 fontSize={1}
                 padding={2}
                 text="Select"
@@ -186,7 +174,7 @@ const ActionRow = () => {
               />
             </Tooltip>
             <Button
-              space={2}
+              gap={2}
               fontSize={1}
               padding={2}
               text="Create"
@@ -201,6 +189,106 @@ const ActionRow = () => {
   );
 };
 
+type ResultDocument = PaginatedClient['results'][number];
+
+interface TableRowProps {
+  item: ResultDocument;
+  schemaType: SchemaType;
+  fields: TableField[];
+  isSelectState: boolean;
+  isList: boolean;
+  selected: boolean;
+  isOpened: boolean;
+  onToggleSelect: (id: string) => void;
+  onNavigate: (id: string, type: string) => void;
+}
+
+// Memoized so that selecting/opening one row doesn't re-render the other 99
+// — each of which renders an expensive `<Preview>` from the document preview
+// store. This only pays off because every prop below is stable: `selected`
+// and `isOpened` are booleans computed once in the parent (not a shared
+// `Set`), and the callbacks are `useCallback`s that never change identity.
+const TableRow = memo(function TableRow({
+  item,
+  schemaType,
+  fields,
+  isSelectState,
+  isList,
+  selected,
+  isOpened,
+  onToggleSelect,
+  onNavigate,
+}: TableRowProps) {
+  const statusTone =
+    item._status === 'published'
+      ? 'positive'
+      : item._status === 'draft'
+        ? 'caution'
+        : 'primary';
+  const statusLabel =
+    item._status === 'published_with_pending_changes'
+      ? 'Staged changes'
+      : item._status;
+
+  return (
+    <RowPrimitive
+      data-as="a"
+      $selected={isOpened}
+      $tone={selected ? 'primary' : 'default'}
+      onClick={(e) => {
+        // prevent the menu button from causing a navigation
+        if (parentHasClass(e.target, 'prevent-nav')) {
+          return;
+        }
+        if (isSelectState) {
+          onToggleSelect(item._normalizedId);
+          return;
+        }
+        onNavigate(item._normalizedId, item._type);
+      }}
+    >
+      {isSelectState && (
+        <CheckboxCellTd className="prevent-nav">
+          <HiddenCheckbox
+            type="checkbox"
+            checked={selected}
+            onChange={(e) => {
+              e.preventDefault();
+              onToggleSelect(item._normalizedId);
+              e.stopPropagation();
+            }}
+          />
+          <CheckboxFacade aria-hidden="true">
+            <Checkbox tabIndex={-1} checked={selected} readOnly={true} />
+          </CheckboxFacade>
+        </CheckboxCellTd>
+      )}
+      <CellPrimitive as="td" className="title-cell">
+        <Preview schemaType={schemaType} layout="default" value={item} />
+      </CellPrimitive>
+      <CellPrimitive as="td">
+        {isList ? (
+          <StatusDot $tone={statusTone} title={statusLabel} />
+        ) : (
+          <StatusBadge tone={statusTone}>{statusLabel}</StatusBadge>
+        )}
+      </CellPrimitive>
+      {fields.map((field: TableField) => (
+        <Cell
+          key={field.fieldPath}
+          field={field.field}
+          fieldPath={field.fieldPath}
+          // GROQ projections alias nested fields literally as
+          // `"a.b": a.b`, so the result object has a key named
+          // "a.b" verbatim -- not a nested `a: {b: ...}` shape.
+          value={(item as Record<string, unknown>)[field.fieldPath]}
+        />
+      ))}
+      {!isList && <ColumnSelectBodyCell />}
+    </RowPrimitive>
+  );
+});
+
 const Table = () => {
   const { navigateIntent, groupIndex, routerPanesState } = usePaneRouter();
   const openedDocumentId = routerPanesState[groupIndex + 1]?.[0]?.id || null;
@@ -214,14 +302,17 @@ const Table = () => {
     schemaType,
     isSelectState,
     paginatedClient,
+    options: { layout },
   } = useBulkActionsTableContext();
 
-  const documentsListRef = useRef<HTMLDivElement | null>(null);
+  const isList = layout === 'list';
+
+  const documentsListRef = useRef<HTMLTableElement | null>(null);
 
   const visibleNonSchemaFields = useMemo(
     () =>
       nonSchemaFields.filter((field) => selectedColumns.has(field.fieldPath)),
-    [nonSchemaFields, selectedColumns],
+    [selectedColumns],
   );
 
   const selectableFields = useMemo(
@@ -234,195 +325,161 @@ const Table = () => {
     [schemaType, selectedColumns],
   );
 
-  const fields: TableField[] = [...visibleNonSchemaFields, ...selectableFields];
-
-  const atLeastOneSelected = paginatedClient.results.some((i) =>
-    selectedIds.has(i._normalizedId),
+  const fields: TableField[] = useMemo(
+    () => (isList ? [] : [...visibleNonSchemaFields, ...selectableFields]),
+    [isList, visibleNonSchemaFields, selectableFields],
   );
-  const allSelected = paginatedClient.results.every((i) =>
-    selectedIds.has(i._normalizedId),
+
+  const atLeastOneSelected = useMemo(
+    () =>
+      paginatedClient.results.some((i) => selectedIds.has(i._normalizedId)),
+    [paginatedClient.results, selectedIds],
+  );
+  const allSelected = useMemo(
+    () =>
+      paginatedClient.results.every((i) => selectedIds.has(i._normalizedId)),
+    [paginatedClient.results, selectedIds],
+  );
+
+  // Functional updater form so this never depends on (and never changes with)
+  // the current `selectedIds` value -- setSelectedIds itself is already
+  // stable, so this callback identity never changes either.
+  const onToggleSelect = useCallback((id: string) => {
+    setSelectedIds((prevSet: Set<string>) => {
+      const nextSet = new Set(prevSet);
+      if (nextSet.has(id)) {
+        nextSet.delete(id);
+      } else {
+        nextSet.add(id);
+      }
+      return nextSet;
+    });
+  }, [setSelectedIds]);
+
+  const onNavigate = useCallback(
+    (id: string, type: string) => {
+      // The router works in published ids — passing a `drafts.` prefixed id
+      // here opens the wrong pane and breaks the selected-row highlight for
+      // documents that have a draft.
+      navigateIntent('edit', { id, type });
+    },
+    [navigateIntent],
   );
 
   return (
-    <TableWrapper hasResults={!!paginatedClient.results.length}>
-      <StyledTable ref={documentsListRef}>
+    <TableWrapper $hasResults={!!paginatedClient.results.length}>
+      <StyledTable ref={documentsListRef} $list={isList}>
         <colgroup>
           {isSelectState && <col />}
           <col />
-          <col />
+          <col style={isList ? { width: LIST_STATUS_WIDTH } : undefined} />
           {fields.map((field: TableField) => (
             <col key={field.fieldPath} />
           ))}
-          <col style={{ width: COLUMN_SELECTOR_WIDTH }} />
+          {!isList && <col style={{ width: COLUMN_SELECTOR_WIDTH }} />}
         </colgroup>
-        <TableHeadPrimitive tone="default">
-          <RowPrimitive>
-            {isSelectState && (
-              <CheckboxCellTh className="prevent-nav">
-                <HiddenCheckbox
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={() => {
-                    setSelectedIds((prevSet: Set<string>) => {
-                      const nextSet = new Set(prevSet);
-                      if (allSelected) {
-                        for (const result of paginatedClient.results || []) {
-                          nextSet.delete(result._normalizedId);
+        {/* In list layout the head only exists to hold "select all" — there
+            are no columns to label. */}
+        {(!isList || isSelectState) && (
+          <TableHeadPrimitive>
+            <RowPrimitive>
+              {isSelectState && (
+                <CheckboxCellTh className="prevent-nav">
+                  <HiddenCheckbox
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={() => {
+                      setSelectedIds((prevSet: Set<string>) => {
+                        const nextSet = new Set(prevSet);
+                        if (allSelected) {
+                          for (const result of paginatedClient.results || []) {
+                            nextSet.delete(result._normalizedId);
+                          }
+                        } else {
+                          for (const result of paginatedClient.results || []) {
+                            nextSet.add(result._normalizedId);
+                          }
                         }
-                      } else {
-                        for (const result of paginatedClient.results || []) {
-                          nextSet.add(result._normalizedId);
-                        }
-                      }
 
-                      return nextSet;
-                    });
-                  }}
-                />
-                <CheckboxFacade aria-hidden="true">
-                  <Checkbox
-                    tabIndex={-1}
-                    checked={atLeastOneSelected}
-                    indeterminate={atLeastOneSelected && !allSelected}
-                    readOnly={true}
+                        return nextSet;
+                      });
+                    }}
                   />
-                </CheckboxFacade>
-              </CheckboxCellTh>
-            )}
-            <TableHeadCell
-              field={{
-                title: 'Document',
-                fieldPath: '_document',
-                type: 'string',
-                sortable: false,
-                field: { type: { name: 'string' } } as any,
-                level: 0,
-              }}
-            />
-            <TableHeadCell
-              field={{
-                title: 'Status',
-                fieldPath: '_status',
-                type: 'string',
-                sortable: false,
-                field: { type: { name: 'string' } } as any,
-                level: 0,
-              }}
-            />
-            {fields.map((field: TableField) => (
-              <TableHeadCell key={field.fieldPath} field={field} />
-            ))}
-            <ColumnSelectHeadCell>
-              <ColumnSelector
-                schemaType={schemaType}
-                selectedColumns={selectedColumns}
-                onToggleColumnSelect={(key) => {
-                  const nextSet = new Set(selectedColumns);
-                  if (nextSet.has(key)) {
-                    setOrderColumn(orderColumnDefault);
-                  }
-                  if (nextSet.has(key)) {
-                    nextSet.delete(key);
-                  } else {
-                    nextSet.add(key);
-                  }
-                  setSelectedColumns(nextSet);
-                }}
-              />
-            </ColumnSelectHeadCell>
-          </RowPrimitive>
-        </TableHeadPrimitive>
-        <tbody>
-          {paginatedClient.results.map((item) => {
-            const toggleSelect = () => {
-              setSelectedIds((prevSet: Set<string>) => {
-                const nextSet = new Set(prevSet);
-                if (selectedIds.has(item._normalizedId)) {
-                  nextSet.delete(item._normalizedId);
-                } else {
-                  nextSet.add(item._normalizedId);
-                }
-                return nextSet;
-              });
-            };
-            return (
-              <RowPrimitive
-                data-as="a"
-                key={item._normalizedId}
-                selected={item._id === openedDocumentId}
-                tone={
-                  selectedIds.has(item._normalizedId) ? 'primary' : 'default'
-                }
-                onClick={(e) => {
-                  // prevent the menu button from causing a navigation
-                  if (parentHasClass(e.target as HTMLElement, 'prevent-nav')) {
-                    return;
-                  }
-                  if (isSelectState) {
-                    toggleSelect();
-                    return;
-                  }
-                  navigateIntent('edit', {
-                    id: item._id,
-                    type: item._type,
-                    selectedRev: item._rev,
-                  });
-                }}
-              >
-                {isSelectState && (
-                  <CheckboxCellTd className="prevent-nav">
-                    <HiddenCheckbox
-                      type="checkbox"
-                      checked={selectedIds.has(item._normalizedId)}
-                      onChange={(e) => {
-                        e.preventDefault();
-                        toggleSelect();
-                        e.stopPropagation();
+                  <CheckboxFacade aria-hidden="true">
+                    <Checkbox
+                      tabIndex={-1}
+                      checked={atLeastOneSelected}
+                      indeterminate={atLeastOneSelected && !allSelected}
+                      readOnly={true}
+                    />
+                  </CheckboxFacade>
+                </CheckboxCellTh>
+              )}
+              {isList ? (
+                <CellPrimitive as="th" colSpan={2} />
+              ) : (
+                <>
+                  <TableHeadCell
+                    field={{
+                      title: 'Document',
+                      fieldPath: '_document',
+                      type: 'string',
+                      sortable: false,
+                      field: { type: { name: 'string' } },
+                      level: 0,
+                    }}
+                  />
+                  <TableHeadCell
+                    field={{
+                      title: 'Status',
+                      fieldPath: '_status',
+                      type: 'string',
+                      sortable: false,
+                      field: { type: { name: 'string' } },
+                      level: 0,
+                    }}
+                  />
+                  {fields.map((field: TableField) => (
+                    <TableHeadCell key={field.fieldPath} field={field} />
+                  ))}
+                  <ColumnSelectHeadCell>
+                    <ColumnSelector
+                      schemaType={schemaType}
+                      selectedColumns={selectedColumns}
+                      onToggleColumnSelect={(key) => {
+                        const nextSet = new Set(selectedColumns);
+                        if (nextSet.has(key)) {
+                          setOrderColumn(orderColumnDefault);
+                        }
+                        if (nextSet.has(key)) {
+                          nextSet.delete(key);
+                        } else {
+                          nextSet.add(key);
+                        }
+                        setSelectedColumns(nextSet);
                       }}
                     />
-                    <CheckboxFacade aria-hidden="true">
-                      <Checkbox
-                        tabIndex={-1}
-                        checked={selectedIds.has(item._normalizedId)}
-                        readOnly={true}
-                      />
-                    </CheckboxFacade>
-                  </CheckboxCellTd>
-                )}
-                <CellPrimitive as="td" className="title-cell">
-                  <Preview
-                    schemaType={schemaType}
-                    layout="default"
-                    value={item}
-                  />
-                </CellPrimitive>
-                <CellPrimitive as="td">
-                  <StatusBadge
-                    tone={
-                      item._status === 'published'
-                        ? 'positive'
-                        : item._status === 'draft'
-                          ? 'caution'
-                          : 'primary'
-                    }
-                  >
-                    {item._status === 'published_with_pending_changes'
-                      ? 'Staged changes'
-                      : item._status}
-                  </StatusBadge>
-                </CellPrimitive>
-                {fields.map((field: TableField) => (
-                  <Cell
-                    key={field.fieldPath}
-                    field={field.field}
-                    fieldPath={field.fieldPath}
-                    value={get(item, field.fieldPath)}
-                  />
-                ))}
-                <ColumnSelectBodyCell />
-              </RowPrimitive>
-            );
-          })}
+                  </ColumnSelectHeadCell>
+                </>
+              )}
+            </RowPrimitive>
+          </TableHeadPrimitive>
+        )}
+        <tbody>
+          {paginatedClient.results.map((item) => (
+            <TableRow
+              key={item._normalizedId}
+              item={item}
+              schemaType={schemaType}
+              fields={fields}
+              isSelectState={isSelectState}
+              isList={isList}
+              selected={selectedIds.has(item._normalizedId)}
+              isOpened={item._normalizedId === openedDocumentId}
+              onToggleSelect={onToggleSelect}
+              onNavigate={onNavigate}
+            />
+          ))}
         </tbody>
       </StyledTable>
     </TableWrapper>
@@ -432,7 +489,7 @@ const Table = () => {
 const LoadingState = () => {
   const { paginatedClient } = useBulkActionsTableContext();
   return (
-    <LoadingOverlay className={classNames({ active: paginatedClient.loading })}>
+    <LoadingOverlay className={paginatedClient.loading ? 'active' : undefined}>
       <LoadingSpinner />
     </LoadingOverlay>
   );
@@ -442,16 +499,17 @@ const NoResultsState = () => {
   const { navigateIntent } = usePaneRouter();
   const {
     options: { type, title },
-    searchValue,
     paginatedClient,
   } = useBulkActionsTableContext();
+  const { searchValue } = useSearchContext();
 
   if (paginatedClient.loading || paginatedClient.results.length) {
     return null;
   }
 
-  const pluralItemName = pluralize(title || 'item', 0).toLowerCase();
-  const singularItemName = singular(title || 'item').toLowerCase();
+  // ponytail: no inflection — the label is used verbatim so it reads correctly
+  // whether the title is singular or plural ("Post", "Blog Posts", "Category").
+  const itemLabel = title || 'documents';
 
   return (
     <Flex direction="column" align="center">
@@ -460,7 +518,7 @@ const NoResultsState = () => {
           <Text size={2} align="center">
             {searchValue.length
               ? `No results for "${searchValue}".`
-              : `No ${pluralItemName} in your collection.`}
+              : `No ${itemLabel} in your collection.`}
           </Text>
           {!searchValue.length && (
             <Button
@@ -468,7 +526,7 @@ const NoResultsState = () => {
               fontSize={1}
               tone="default"
               icon={AddIcon}
-              text={`Create ${singularItemName}`}
+              text="Create new"
               onClick={() => navigateIntent('create', { type })}
             />
           )}
@@ -539,9 +597,9 @@ const Footer = () => {
 const BulkActionsTableParent = (props: BulkActionsTableProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   return (
-    <ThemeProvider theme={buildTheme()}>
-      <ToastProvider>
-        <BulkActionsTableProvider options={props.options}>
+    <ToastProvider>
+      <BulkActionsTableProvider options={props.options}>
+        <SearchProvider>
           <Container ref={containerRef}>
             <ActionRow />
             <LoadingState />
@@ -549,9 +607,9 @@ const BulkActionsTableParent = (props: BulkActionsTableProps) => {
             <NoResultsState />
             <Footer />
           </Container>
-        </BulkActionsTableProvider>
-      </ToastProvider>
-    </ThemeProvider>
+        </SearchProvider>
+      </BulkActionsTableProvider>
+    </ToastProvider>
   );
 };
 
@@ -603,23 +661,46 @@ function createBulkActionsTable(
   }
 
   if (
+    config.layout !== undefined &&
+    config.layout !== 'table' &&
+    config.layout !== 'list'
+  ) {
+    throw new Error(`
+      'layout' parameter must be either 'table' or 'list' when provided.
+      Example: createBulkActionsTable({type: 'post', S, context, layout: 'list'})
+    `);
+  }
+
+  if (
     config.apiVersion !== undefined &&
     typeof config.apiVersion !== 'string'
   ) {
     throw new Error(`
       'apiVersion' parameter must be a string when provided.
-      Example: createBulkActionsTable({type: 'post', S, context, apiVersion: '2024-03-12'})
+      Example: createBulkActionsTable({type: 'post', S, context, apiVersion: '2025-02-19'})
     `);
   }
 
-  const { type, context, S, title, icon, apiVersion = '2024-03-12' } = config;
+  const {
+    type,
+    context,
+    S,
+    title,
+    icon,
+    layout = 'table',
+    apiVersion = '2025-02-19',
+  } = config;
   const { schema, getClient } = context;
   const client = getClient({ apiVersion });
 
   const refresh = createEmitter();
 
+  // Structure ids must be unique, so a table and a list view of the same type
+  // can't both be `type`.
+  const id = layout === 'list' ? `${type}-list` : type;
+
   return S.listItem()
-    .id(type)
+    .id(id)
     .title(title || type)
     .icon(icon || FolderIcon)
     .child(
@@ -627,9 +708,9 @@ function createBulkActionsTable(
         // Prevents the component from re-rendering when switching documents
         __preserveInstance: true,
         // Prevents the component from NOT re-rendering when switching listItems
-        key: type,
+        key: id,
         type: 'component',
-        options: { type, client, schema, refresh, title },
+        options: { type, client, schema, refresh, title, layout },
         component: BulkActionsTableParent,
         menuItems: [
           S.menuItem()

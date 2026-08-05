@@ -1,7 +1,9 @@
 import { Text } from '@sanity/ui';
+import { memo } from 'react';
 import { Preview, SchemaType } from 'sanity';
 import styled from 'styled-components';
 
+import { TableField } from '../types';
 import { CellPrimitive } from './primitives';
 
 const TableDiv = styled(Text)`
@@ -40,11 +42,16 @@ function formatDatetime(
 }
 
 interface Props {
-  field: any;
+  field: TableField['field'];
   fieldPath: string;
   value: any;
 }
 
+// Props are stable across a row's re-renders (field comes from the memoized
+// `fields` array, value is read off the row's stable `item` reference), so
+// this skips re-rendering every cell -- including the expensive `image`/
+// default `<Preview>` cases -- when a row updates only for an unrelated
+// reason (e.g. its `selected` state flipping).
 function Cell({ field, fieldPath, value }: Props) {
   switch (field.type.name) {
     case 'date':
@@ -111,6 +118,7 @@ function Cell({ field, fieldPath, value }: Props) {
                   fit: 'fill',
                   aspect: 1,
                 }}
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `field` is a schema field OR a built-in mock column (see TableField); Preview only ever receives real schema fields at runtime, but that isn't statically provable from the union.
                 schemaType={field.type as SchemaType}
               />
             </TableCellContentImage>
@@ -128,6 +136,7 @@ function Cell({ field, fieldPath, value }: Props) {
               <Preview
                 value={value}
                 layout="default"
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `field` is a schema field OR a built-in mock column (see TableField); Preview only ever receives real schema fields at runtime, but that isn't statically provable from the union.
                 schemaType={field.type as SchemaType}
               />
             ) : (
@@ -140,4 +149,4 @@ function Cell({ field, fieldPath, value }: Props) {
   }
 }
 
-export default Cell;
+export default memo(Cell);

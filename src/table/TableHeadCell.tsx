@@ -1,28 +1,18 @@
-import { ChevronDownIcon, ChevronUpIcon } from '@sanity/icons';
+import { ChevronDownIcon } from '@sanity/icons/ChevronDown';
+import { ChevronUpIcon } from '@sanity/icons/ChevronUp';
 import { Box, Button, Text, Tooltip } from '@sanity/ui';
-import { useCallback } from 'react';
+import { ComponentProps, useCallback } from 'react';
 import styled, { css } from 'styled-components';
 
 import { orderColumnDefault } from '../constants';
 import { useBulkActionsTableContext } from '../context';
-import { SelectableField } from '../helpers/getSelectableFields';
+import { TableField } from '../types';
 import { CellPrimitive } from './primitives';
-
-// Type for fields that can be either real SelectableField or mock fields for built-in columns
-type TableField =
-  | SelectableField
-  | {
-      fieldPath: string;
-      title: string | undefined;
-      level: number;
-      sortable: boolean;
-      type: string;
-      field: { type: { name: string } };
-    };
 
 interface ExtraProps {
   mode: 'default' | 'ghost' | 'bleed';
   tone?: 'default' | 'primary' | 'positive' | 'caution' | 'critical';
+  iconRight?: ComponentProps<typeof Button>['iconRight'];
 }
 
 export const TableHeaderButton = styled(Button)(({
@@ -64,7 +54,7 @@ export function TableHeadCell({ field }: { field: TableField }) {
           : 'asc',
       type: fieldType,
     });
-  }, [orderColumn, setOrderColumn]);
+  }, [field, orderColumn, setOrderColumn]);
 
   const isSelected = orderColumn.key === field.fieldPath;
   const extraProps: ExtraProps = {
@@ -73,7 +63,7 @@ export function TableHeadCell({ field }: { field: TableField }) {
   };
 
   if (orderColumn.key === field.fieldPath) {
-    (extraProps as any).iconRight =
+    extraProps.iconRight =
       orderColumn.direction === 'asc' ? ChevronUpIcon : ChevronDownIcon;
   }
 
