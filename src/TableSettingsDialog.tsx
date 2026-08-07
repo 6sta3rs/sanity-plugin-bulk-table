@@ -20,7 +20,7 @@ export default function TableSettingsDialog({onClose}: {onClose: () => void}) {
   return (
     <Dialog id={dialogId} header="Table settings" onClose={onClose} width={1} zOffset={1000}>
       <Box padding={4}>
-        <Stack space={4}>
+        <Stack gap={4}>
           <Setting
             title="Full width columns"
             description="Every column as wide as its content needs, with the table scrolling sideways. Off: columns share the space evenly and text is truncated."
@@ -36,7 +36,7 @@ export default function TableSettingsDialog({onClose}: {onClose: () => void}) {
           </Setting>
 
           <Card borderTop paddingTop={4}>
-            <Stack space={3}>
+            <Stack gap={3}>
               <Flex align="center" justify="space-between" gap={3}>
                 <Text size={1} weight="medium">
                   Maximum column width
@@ -88,7 +88,7 @@ function Setting({
 }) {
   return (
     <Flex align="flex-start" justify="space-between" gap={3}>
-      <Stack space={2} flex={1}>
+      <Stack gap={2} flex={1}>
         <Text size={1} weight="medium">
           {title}
         </Text>

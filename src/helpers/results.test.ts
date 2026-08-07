@@ -3,8 +3,13 @@ import {describe, expect, it} from 'vitest'
 
 import {isDraftId, publishedIdOf, reduceResults} from './results'
 
-const doc = (_id: string, _updatedAt: string): SanityDocument =>
-  ({_id, _type: 'thing', _updatedAt}) as SanityDocument
+const doc = (_id: string, _updatedAt: string): SanityDocument => ({
+  _id,
+  _type: 'thing',
+  _rev: 'rev',
+  _createdAt: '2024-01-01T00:00:00Z',
+  _updatedAt,
+})
 
 describe('publishedIdOf', () => {
   it('strips the drafts. prefix', () => {

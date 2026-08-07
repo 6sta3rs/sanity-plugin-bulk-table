@@ -79,7 +79,8 @@ const reviveStringSet = (raw: unknown): Set<string> | undefined =>
 
 const reviveColumnOrder = (raw: unknown): ColumnOrder | undefined => {
   if (!raw || typeof raw !== 'object') return undefined
-  const {key, direction, type} = raw as Record<string, unknown>
+  if (!('key' in raw) || !('direction' in raw) || !('type' in raw)) return undefined
+  const {key, direction, type} = raw
   if (typeof key !== 'string') return undefined
   if (direction !== 'asc' && direction !== 'desc') return undefined
   if (type !== null && typeof type !== 'string') return undefined
@@ -96,6 +97,7 @@ export function useStickyState<T extends boolean | number | string>(
   return useStored<T>(
     key,
     defaultValue,
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `typeof` is the only check available for a `boolean | number | string` union, and it narrows the runtime value without narrowing the type.
     (raw) => (typeof raw === typeof defaultValue ? (raw as T) : undefined),
     identity,
   )

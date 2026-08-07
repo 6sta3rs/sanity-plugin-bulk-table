@@ -56,12 +56,15 @@ export function reduceResults(documents: SanityDocument[], pageIds: string[]): R
 
   const position = new Map(pageIds.map((id, index) => [id, index]))
 
-  return Array.from(pairs, ([id, {draft, published}]): ResultDocument => {
+  const rows: ResultDocument[] = []
+
+  for (const [id, {draft, published}] of pairs) {
     // The draft wins: it is what the editor sees on opening the document.
     const base = draft ?? published
+    if (!base) continue
 
-    return {
-      ...(base as SanityDocument),
+    rows.push({
+      ...base,
       _normalizedId: id,
       _status:
         draft && published ? 'published_with_pending_changes' : draft ? 'draft' : 'published',
@@ -70,6 +73,10 @@ export function reduceResults(documents: SanityDocument[], pageIds: string[]): R
       // table happened to be sorted by, so a published document with a draft
       // read "Not published" whenever the table stood on "Updated" descending.
       _lastPublishedAt: published?._updatedAt ?? null,
-    }
-  }).sort((a, b) => (position.get(a._normalizedId) ?? 0) - (position.get(b._normalizedId) ?? 0))
+    })
+  }
+
+  return rows.sort(
+    (a, b) => (position.get(a._normalizedId) ?? 0) - (position.get(b._normalizedId) ?? 0),
+  )
 }

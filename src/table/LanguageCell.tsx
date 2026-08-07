@@ -55,7 +55,6 @@ function LanguageCell({
               fontSize={0}
               padding={1}
               radius={2}
-              mode={complete ? 'default' : 'outline'}
               tone={complete ? 'positive' : percent > 0 ? 'caution' : 'critical'}
             >
               {code.toUpperCase()}

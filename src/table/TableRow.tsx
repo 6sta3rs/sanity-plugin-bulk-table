@@ -121,12 +121,7 @@ const TableRow = memo(function TableRow({
           column — which is why it sits next to the status. */}
       {!isList && !!languages?.length && (
         <CellPrimitive as="td">
-          <LanguageCell
-            row={item as unknown as Record<string, unknown>}
-            fields={i18nFields}
-            languages={languages}
-            label={languageName}
-          />
+          <LanguageCell row={item} fields={i18nFields} languages={languages} label={languageName} />
         </CellPrimitive>
       )}
       {fields.map((field: TableField) => (

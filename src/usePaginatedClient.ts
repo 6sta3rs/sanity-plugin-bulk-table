@@ -218,7 +218,9 @@ function usePaginatedClient({
   }, [fetchResults])
 
   useEffect(() => {
-    if (!pageIds.length) return
+    // `undefined`, not a bare `return`: the other branch returns a cleanup
+    // function, and the two have to agree.
+    if (!pageIds.length) return undefined
 
     const ids = pageIds.flatMap((id) => [id, `drafts.${id}`])
 

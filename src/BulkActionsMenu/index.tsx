@@ -114,6 +114,9 @@ async function planActions(
         publishedId: getPublishedId(DocumentId(id)),
         includeDrafts: [getDraftId(DocumentId(id))],
       }))
+
+    default:
+      return []
   }
 }
 

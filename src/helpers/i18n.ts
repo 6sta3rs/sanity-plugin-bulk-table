@@ -22,10 +22,14 @@ export const isI18nArray = (typeName: string): boolean =>
 // field; `_key` is only a fallback for documents written by older versions.
 const languageOf = (item: I18nItem) => item.language ?? item._key
 
+// A guard rather than a cast: the value comes straight out of GROQ, so its type
+// is `unknown` and every field below is optional anyway.
+const isI18nItems = (value: unknown): value is I18nItem[] => Array.isArray(value)
+
 /** The text in one language, or `''` when that version doesn't exist yet. */
 export function i18nValue(value: unknown, language: string): string {
-  if (!Array.isArray(value)) return ''
-  const item = (value as I18nItem[]).find((i) => languageOf(i) === language)
+  if (!isI18nItems(value)) return ''
+  const item = value.find((i) => languageOf(i) === language)
   return typeof item?.value === 'string' ? item.value.trim() : ''
 }
 
