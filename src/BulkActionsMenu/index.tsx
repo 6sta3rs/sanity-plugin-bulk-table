@@ -1,29 +1,18 @@
-import { DocumentId, getDraftId, getPublishedId } from '@sanity/id-utils';
-import ChevronDownIcon from '@sanity/icons/ChevronDown';
-import PublishIcon from '@sanity/icons/Publish';
-import ResetIcon from '@sanity/icons/Reset';
-import TrashIcon from '@sanity/icons/Trash';
-import UnpublishIcon from '@sanity/icons/Unpublish';
-import {
-  Button,
-  Dialog,
-  Menu,
-  MenuButton,
-  MenuDivider,
-  MenuItem,
-  useToast,
-} from '@sanity/ui';
-import { Component, ReactNode, useId, useState } from 'react';
-import { Preview } from 'sanity';
-import styled from 'styled-components';
+import {SanityClient} from '@sanity/client'
+import {ChevronDownIcon} from '@sanity/icons/ChevronDown'
+import {DocumentId, getDraftId, getPublishedId} from '@sanity/id-utils'
+import {Button, Dialog, Menu, MenuButton, MenuDivider, MenuItem, useToast} from '@sanity/ui'
+import {useId, useState} from 'react'
+import styled from 'styled-components'
 
-import { useBulkActionsTableContext } from '../context';
-import { handleBulkOperationError } from '../utils/errorHandling';
+import {useBulkActionsTableContext, useLabels} from '../context'
+import {logError} from '../utils/errorHandling'
+import {BULK_DIALOGS, BulkMode} from './dialogs'
 
 const Content = styled.div`
   padding: 0 1rem;
   font-size: 0.85rem;
-`;
+`
 
 const Footer = styled.div`
   display: flex;
@@ -31,293 +20,182 @@ const Footer = styled.div`
   gap: 0.5rem;
   justify-content: flex-end;
   padding: 0.75rem;
-`;
+`
+
+type BulkAction =
+  | {
+      actionType: 'sanity.action.document.publish'
+      draftId: string
+      publishedId: string
+    }
+  | {
+      actionType: 'sanity.action.document.unpublish'
+      draftId: string
+      publishedId: string
+    }
+  | {
+      actionType: 'sanity.action.document.version.discard'
+      versionId: string
+    }
+  | {
+      actionType: 'sanity.action.document.delete'
+      publishedId: string
+      includeDrafts: string[]
+    }
+
+/**
+ * How many documents go into one request.
+ *
+ * A constant, not a setting. A request is atomic, so without chunking a
+ * selection of a hundred items went out as a single transaction and one
+ * document with an incoming reference took the whole thing down with no word on
+ * how much had succeeded. If Sanity's own limit ever changes, this is the one
+ * number to change.
+ */
+const CHUNK_SIZE = 30
+
+/**
+ * Which documents the operation will actually touch.
+ *
+ * This answers a question nobody used to ask: the toast said "published 41
+ * documents" because it reported the size of the selection rather than the
+ * number of documents that had a draft to publish.
+ */
+async function planActions(
+  mode: BulkMode,
+  client: SanityClient,
+  selectedIds: string[],
+): Promise<BulkAction[]> {
+  switch (mode) {
+    case 'publish': {
+      const draftIds = await client.fetch<string[]>('*[_id in $ids]._id', {
+        ids: selectedIds.map((id) => getDraftId(DocumentId(id))),
+      })
+      return draftIds.map((draftId) => ({
+        actionType: 'sanity.action.document.publish',
+        draftId,
+        publishedId: getPublishedId(DocumentId(draftId)),
+      }))
+    }
+
+    case 'unpublish': {
+      // `sanity.action.document.unpublish` moves the published content into a
+      // draft only when no draft exists yet — unlike the old createIfNotExists
+      // + delete pair, which silently lost the published content whenever a
+      // draft was already waiting.
+      const publishedIds = await client.fetch<string[]>('*[_id in $ids]._id', {
+        ids: selectedIds,
+      })
+      return publishedIds.map((publishedId) => ({
+        actionType: 'sanity.action.document.unpublish',
+        draftId: getDraftId(DocumentId(publishedId)),
+        publishedId: getPublishedId(DocumentId(publishedId)),
+      }))
+    }
+
+    case 'discard_changes': {
+      const ids = await client.fetch<string[]>('*[_id in $ids]._id', {
+        ids: selectedIds.flatMap((id) => [id, getDraftId(DocumentId(id))]),
+      })
+      const present = new Set(ids)
+      return ids
+        .filter((id) => id.startsWith('drafts.') && present.has(getPublishedId(DocumentId(id))))
+        .map((versionId) => ({
+          actionType: 'sanity.action.document.version.discard',
+          versionId,
+        }))
+    }
+
+    case 'delete':
+      // No existence check: the delete action is a no-op for ids that don't
+      // exist, and only errors when a draft outside `includeDrafts` exists.
+      return selectedIds.map((id) => ({
+        actionType: 'sanity.action.document.delete',
+        publishedId: getPublishedId(DocumentId(id)),
+        includeDrafts: [getDraftId(DocumentId(id))],
+      }))
+  }
+}
 
 interface Props {
-  onDelete: () => void;
+  /** Called after an operation that may have changed the page's contents. */
+  onChanged: () => void
 }
 
-// Renders nothing if a child throws — this only guards the document previews
-// inside an error toast, where a second crash must not take down the pane.
-// @sanity/ui's ErrorBoundary is @beta ("DO NOT USE IN PRODUCTION") and renders
-// the error message instead of nothing, so it is not usable here.
-class SilentErrorBoundary extends Component<
-  { children: ReactNode },
-  { failed: boolean }
-> {
-  state = { failed: false };
-
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-
-  render() {
-    return this.state.failed ? null : this.props.children;
-  }
-}
-
-const ErroredDocuments = ({ e, schemaType }: { e: any; schemaType: any }) => {
-  // ponytail: Actions API error shape isn't confirmed to carry per-document ids
-  // the way the old Mutations API's `details.items[].error.id` did (the typed
-  // ActionErrorItem only guarantees `index` + `error.type`/`description`).
-  // Read defensively and fall back to an empty list rather than throwing.
-  const idsWithErrors: string[] =
-    e?.details?.items
-      ?.map((item: any) => item?.error?.id)
-      .filter((id: unknown): id is string => typeof id === 'string') ?? [];
-
-  if (!idsWithErrors.length) {
-    return null;
-  }
-
-  const plural = idsWithErrors.length !== 1;
-
-  return (
-    <SilentErrorBoundary>
-      <p>
-        Please unselect {plural ? 'these' : 'this'} document{plural ? 's' : ''}{' '}
-        and try again:
-      </p>
-      <p>
-        {idsWithErrors.map((id) => (
-          <Preview
-            key={id}
-            schemaType={schemaType}
-            layout="default"
-            value={{ _id: id, _type: schemaType.type }}
-          />
-        ))}
-      </p>
-    </SilentErrorBoundary>
-  );
-};
-
-function BulkActionsMenu({ onDelete }: Props) {
+function BulkActionsMenu({onChanged}: Props) {
   const {
-    options: { client },
+    options: {client},
     selectedIds,
     setSelectedIds,
-    schemaType,
-  } = useBulkActionsTableContext();
+    setIsSelectState,
+  } = useBulkActionsTableContext()
+  const labels = useLabels()
 
-  const buttonId = useId();
-  const toast = useToast();
-  const dialogId = useId();
-  const [dialogMode, setDialogMode] = useState<
-    'discard_changes' | 'unpublish' | 'publish' | 'delete' | null
-  >(null);
-  const [loading, setLoading] = useState(false);
+  const buttonId = useId()
+  const dialogId = useId()
+  const toast = useToast()
+  const [mode, setMode] = useState<BulkMode | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  const handleDiscardChanges = async () => {
-    setLoading(true);
+  const run = async (activeMode: BulkMode) => {
+    const copy = BULK_DIALOGS[activeMode]
+    setLoading(true)
+    let done = 0
 
     try {
-      const ids = await client.fetch<string[]>('*[_id in $ids]._id', {
-        ids: Array.from(selectedIds).flatMap((id) => [
-          id,
-          getDraftId(DocumentId(id)),
-        ]),
-      });
+      const actions = await planActions(activeMode, client, Array.from(selectedIds))
 
-      const idSet = ids.reduce((set, id) => {
-        set.add(id);
-        return set;
-      }, new Set<string>());
-
-      const draftIdsThatAlsoHavePublishedIds = ids.filter(
-        (id) =>
-          id.startsWith('drafts.') && idSet.has(id.substring('drafts.'.length)),
-      );
-
-      if (draftIdsThatAlsoHavePublishedIds.length) {
-        await client.action(
-          draftIdsThatAlsoHavePublishedIds.map((versionId) => ({
-            actionType: 'sanity.action.document.version.discard' as const,
-            versionId,
-          })),
-        );
+      for (let i = 0; i < actions.length; i += CHUNK_SIZE) {
+        const chunk = actions.slice(i, i + CHUNK_SIZE)
+        await client.action(chunk)
+        done += chunk.length
       }
 
+      const skipped = selectedIds.size - done
       toast.push({
-        title: 'Changes Discarded',
-        description: `${selectedIds.size} documents reverted`,
-        status: 'success',
+        title: copy.successTitle,
+        description:
+          done === 0
+            ? 'None of the selected documents needed this operation.'
+            : `${done} of ${selectedIds.size}` +
+              (skipped > 0 ? ` (skipped ${skipped} - nothing to change)` : ''),
+        status: done === 0 ? 'warning' : 'success',
         closable: true,
         duration: 10 * 1000,
-      });
-      setSelectedIds(new Set());
+      })
+
+      setSelectedIds(new Set())
+      setIsSelectState(false)
+      onChanged()
     } catch (e) {
-      handleBulkOperationError(e, 'discard changes', Array.from(selectedIds));
+      logError(e, `bulk action: ${activeMode}`)
 
       toast.push({
-        title: 'Error Bulk Discarding Changes',
-        description: (
-          <>
-            <p>The bulk discard changes failed.</p>
-            <ErroredDocuments e={e} schemaType={schemaType} />
-          </>
-        ),
+        title: copy.errorTitle,
+        description: [
+          done > 0
+            ? `Got through ${done} of ${selectedIds.size}. The rest are unchanged.`
+            : 'Nothing was changed.',
+          copy.errorHint,
+          e instanceof Error ? e.message : String(e),
+        ]
+          .filter(Boolean)
+          .join(' '),
         status: 'error',
         closable: true,
         duration: 30 * 1000,
-      });
+      })
+
+      // The page may already have partly changed — after an interrupted
+      // operation it matters all the more to show what actually happened.
+      if (done > 0) onChanged()
     } finally {
-      setDialogMode(null);
-      setLoading(false);
+      setMode(null)
+      setLoading(false)
     }
-  };
+  }
 
-  const handleUnpublish = async () => {
-    setLoading(true);
-
-    try {
-      const publishedIds = await client.fetch<string[]>('*[_id in $ids]._id', {
-        ids: Array.from(selectedIds),
-      });
-
-      if (publishedIds.length) {
-        // sanity.action.document.unpublish moves the published document's
-        // content into the draft only if a draft doesn't already exist,
-        // instead of the old createIfNotExists-then-delete pair, which
-        // silently dropped published content whenever a draft was already
-        // staged.
-        await client.action(
-          publishedIds.map((publishedId) => ({
-            actionType: 'sanity.action.document.unpublish' as const,
-            draftId: getDraftId(DocumentId(publishedId)),
-            publishedId: getPublishedId(DocumentId(publishedId)),
-          })),
-        );
-      }
-
-      toast.push({
-        title: 'Unpublish Successful',
-        description: `${selectedIds.size} documents unpublished`,
-        status: 'success',
-        closable: true,
-        duration: 10 * 1000,
-      });
-      setSelectedIds(new Set());
-    } catch (e) {
-      handleBulkOperationError(e, 'unpublish', Array.from(selectedIds));
-
-      toast.push({
-        title: 'Error Bulk Unpublishing',
-        description: (
-          <>
-            <p>
-              The bulk unpublished failed. This usually occurs because there are
-              other documents referencing the documents you’re trying to
-              unpublish.
-            </p>
-            <ErroredDocuments e={e} schemaType={schemaType} />
-          </>
-        ),
-        status: 'error',
-        closable: true,
-        duration: 30 * 1000,
-      });
-    } finally {
-      setDialogMode(null);
-      setLoading(false);
-    }
-  };
-
-  const handlePublish = async () => {
-    setLoading(true);
-
-    try {
-      const draftIds = await client.fetch<string[]>('*[_id in $ids]._id', {
-        ids: Array.from(selectedIds).map((id) => getDraftId(DocumentId(id))),
-      });
-
-      if (draftIds.length) {
-        await client.action(
-          draftIds.map((draftId) => ({
-            actionType: 'sanity.action.document.publish' as const,
-            draftId,
-            publishedId: getPublishedId(DocumentId(draftId)),
-          })),
-        );
-      }
-
-      toast.push({
-        title: 'Publish Successful',
-        description: `${selectedIds.size} documents published`,
-        status: 'success',
-        closable: true,
-        duration: 10 * 1000,
-      });
-      setSelectedIds(new Set());
-    } catch (e) {
-      handleBulkOperationError(e, 'publish', Array.from(selectedIds));
-
-      toast.push({
-        title: 'Error Bulk Publishing',
-        description: (
-          <>
-            <p>The bulk publish failed.</p>
-            <ErroredDocuments e={e} schemaType={schemaType} />
-          </>
-        ),
-        status: 'error',
-        closable: true,
-        duration: 30 * 1000,
-      });
-    } finally {
-      setDialogMode(null);
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    setLoading(true);
-
-    try {
-      // sanity.action.document.delete errors if a draft exists that isn't
-      // listed in includeDrafts, but is otherwise a no-op for ids that don't
-      // exist, so no existence pre-check is needed here.
-      await client.action(
-        Array.from(selectedIds).map((id) => ({
-          actionType: 'sanity.action.document.delete' as const,
-          publishedId: getPublishedId(DocumentId(id)),
-          includeDrafts: [getDraftId(DocumentId(id))],
-        })),
-      );
-
-      toast.push({
-        title: 'Delete Successful',
-        description: `${selectedIds.size} documents deleted`,
-        status: 'success',
-        closable: true,
-        duration: 10 * 1000,
-      });
-
-      onDelete();
-    } catch (e) {
-      handleBulkOperationError(e, 'delete', Array.from(selectedIds));
-
-      toast.push({
-        title: 'Error Bulk Deleting',
-        description: (
-          <>
-            <p>
-              The bulk delete failed. This usually occurs because there are
-              other documents referencing the documents you’re trying to delete.
-            </p>
-
-            <ErroredDocuments e={e} schemaType={schemaType} />
-          </>
-        ),
-        status: 'error',
-        closable: true,
-        duration: 30 * 1000,
-      });
-    } finally {
-      setDialogMode(null);
-      setLoading(false);
-    }
-  };
+  const copy = mode ? BULK_DIALOGS[mode] : null
 
   return (
     <>
@@ -328,236 +206,64 @@ function BulkActionsMenu({ onDelete }: Props) {
             gap={2}
             fontSize={1}
             padding={2}
-            text="Update items"
+            text={labels.bulkButton}
             tone="primary"
             iconRight={ChevronDownIcon}
           />
         }
-        popover={{ portal: true, placement: 'bottom' }}
+        popover={{portal: true, placement: 'bottom'}}
         menu={
-          <Menu style={{ textAlign: 'left' }}>
-            <MenuItem
-              className="prevent-nav"
-              text="Publish"
-              icon={PublishIcon}
-              tone="positive"
-              onClick={() => setDialogMode('publish')}
-            />
-            <MenuItem
-              className="prevent-nav"
-              text="Discard staged changes"
-              icon={ResetIcon}
-              onClick={() => setDialogMode('discard_changes')}
-            />
-            <MenuItem
-              text="Unpublish"
-              icon={UnpublishIcon}
-              tone="caution"
-              className="prevent-nav"
-              onClick={() => setDialogMode('unpublish')}
-            />
+          <Menu style={{textAlign: 'left'}}>
+            {(['publish', 'discard_changes', 'unpublish'] as const).map((key) => (
+              <MenuItem
+                key={key}
+                className="prevent-nav"
+                text={BULK_DIALOGS[key].menuLabel}
+                icon={BULK_DIALOGS[key].icon}
+                tone={BULK_DIALOGS[key].tone}
+                onClick={() => setMode(key)}
+              />
+            ))}
             <MenuDivider />
             <MenuItem
-              tone="critical"
-              icon={TrashIcon}
-              text="Delete"
               className="prevent-nav"
-              onClick={() => setDialogMode('delete')}
+              text={BULK_DIALOGS.delete.menuLabel}
+              icon={BULK_DIALOGS.delete.icon}
+              tone={BULK_DIALOGS.delete.tone}
+              onClick={() => setMode('delete')}
             />
           </Menu>
         }
       />
 
-      {dialogMode === 'discard_changes' && (
+      {mode && copy && (
         <Dialog
           id={dialogId}
-          header="Discard Changes"
+          header={copy.header}
           zOffset={100000}
           footer={
             <Footer>
               <Button
-                text="Cancel"
+                text={labels.cancel}
                 mode="ghost"
                 disabled={loading}
-                onClick={() => setDialogMode(null)}
+                onClick={() => setMode(null)}
               />
               <Button
-                text="Discard Changes"
-                tone="critical"
-                mode="ghost"
+                text={copy.confirm}
+                tone={copy.tone}
                 disabled={loading}
-                onClick={handleDiscardChanges}
+                onClick={() => void run(mode)}
               />
             </Footer>
           }
-          onClose={() => setDialogMode(null)}
+          onClose={() => setMode(null)}
         >
-          <Content>
-            <p>
-              Are you sure you want to discard changes to{' '}
-              <strong>{selectedIds.size}</strong> document
-              {selectedIds.size === 1 ? '' : 's'}?
-            </p>
-            <p>
-              Discarding changes reverts changes made to any drafts of the
-              selected documents and restores the currently published versions.
-            </p>
-            <p>
-              You can use the{' '}
-              <a
-                href="https://www.sanity.io/docs/history-experience"
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                document history
-              </a>{' '}
-              of each individual document to track these changes.
-            </p>
-          </Content>
-        </Dialog>
-      )}
-
-      {dialogMode === 'unpublish' && (
-        <Dialog
-          id={dialogId}
-          header="Unpublish Documents"
-          zOffset={100000}
-          footer={
-            <Footer>
-              <Button
-                text="Cancel"
-                mode="ghost"
-                disabled={loading}
-                onClick={() => setDialogMode(null)}
-              />
-              <Button
-                text="Unpublish Documents"
-                tone="caution"
-                disabled={loading}
-                onClick={handleUnpublish}
-              />
-            </Footer>
-          }
-          onClose={() => setDialogMode(null)}
-        >
-          <Content>
-            <p>
-              Are you sure you want to unpublish{' '}
-              <strong>{selectedIds.size}</strong> document
-              {selectedIds.size === 1 ? '' : 's'}?
-            </p>
-            <p>
-              If you unpublish a document, it will no longer be available to the
-              public. Its contents will be moved into a draft if a draft does
-              not already exist. From there you can continue to author the
-              document and re-publish it later.
-            </p>
-            <p>
-              You can use the{' '}
-              <a
-                href="https://www.sanity.io/docs/history-experience"
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                document history
-              </a>{' '}
-              of each individual document to track these changes.
-            </p>
-          </Content>
-        </Dialog>
-      )}
-
-      {dialogMode === 'publish' && (
-        <Dialog
-          id={dialogId}
-          header="Publish Documents"
-          zOffset={100000}
-          footer={
-            <Footer>
-              <Button
-                text="Cancel"
-                mode="ghost"
-                disabled={loading}
-                onClick={() => setDialogMode(null)}
-              />
-              <Button
-                text="Publish Documents"
-                tone="positive"
-                disabled={loading}
-                onClick={handlePublish}
-              />
-            </Footer>
-          }
-          onClose={() => setDialogMode(null)}
-        >
-          <Content>
-            <p>
-              Are you sure you want to publish{' '}
-              <strong>{selectedIds.size}</strong> document
-              {selectedIds.size === 1 ? '' : 's'}?
-            </p>
-            <p>
-              Publishing a document makes the current contents of each document
-              publicly available.
-            </p>
-            <p>
-              You can use the{' '}
-              <a
-                href="https://www.sanity.io/docs/history-experience"
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                document history
-              </a>{' '}
-              of each individual document to track these changes.
-            </p>
-          </Content>
-        </Dialog>
-      )}
-
-      {dialogMode === 'delete' && (
-        <Dialog
-          id={dialogId}
-          header="Delete Documents"
-          zOffset={100000}
-          footer={
-            <Footer>
-              <Button
-                text="Cancel"
-                mode="ghost"
-                disabled={loading}
-                onClick={() => setDialogMode(null)}
-              />
-              <Button
-                text="Delete Documents"
-                tone="critical"
-                disabled={loading}
-                onClick={handleDelete}
-              />
-            </Footer>
-          }
-          onClose={() => setDialogMode(null)}
-        >
-          <Content>
-            <p>
-              Are you sure you want to delete{' '}
-              <strong>{selectedIds.size}</strong> document
-              {selectedIds.size === 1 ? '' : 's'}?
-            </p>
-            <p>
-              Deleting a document makes it no longer available to the public as
-              well as removing any draft versions of it.
-            </p>
-            <p>
-              <strong>Note:</strong> in order to delete a document, it must not
-              be referenced by any other document. You may have to remove those
-              references first.
-            </p>
-          </Content>
+          <Content>{copy.body(selectedIds.size)}</Content>
         </Dialog>
       )}
     </>
-  );
+  )
 }
 
-export default BulkActionsMenu;
+export default BulkActionsMenu

@@ -27,6 +27,9 @@
 - **🔔 Error Handling**: Toast notifications for operation feedback and comprehensive error management
 - **↕️ Flexible Sorting**: Click column headers to sort ascending/descending with visual indicators
 - **🗂️ List Layout**: Swap the table for a plain document list (`layout: 'list'`) keeping selection and bulk actions
+- **🌍 Translations**: Point `languages` at your `internationalizedArray*` fields for a language picker, per-language sorting, coverage badges and a "needs translation" filter
+- **🔠 Custom Copy**: Override any string in the UI through `labels` — translate the table or rename "items"
+- **⚙️ Table Settings**: Full-width columns, a column width limit and dense rows, from the pane's "⋯" menu
 
 ---
 
@@ -53,9 +56,9 @@ This plugin integrates with Sanity's **Structure Tool**, not as a regular plugin
 Add the bulk actions table to your `sanity.config.ts` file using the structure configuration:
 
 ```typescript
-import { defineConfig } from 'sanity';
-import { createBulkActionsTable } from 'sanity-plugin-bulk-table';
-import { structureTool } from 'sanity/structure';
+import {defineConfig} from 'sanity'
+import {createBulkActionsTable} from 'sanity-plugin-bulk-table'
+import {structureTool} from 'sanity/structure'
 
 export default defineConfig({
   // ... your other configuration
@@ -75,12 +78,12 @@ export default defineConfig({
               icon: YourIcon, // Optional: custom icon
             }),
             // ... your other structure items
-          ]);
+          ])
       },
     }),
     // ... your other plugins
   ],
-});
+})
 ```
 
 ### Alternative: Separate Structure File
@@ -89,23 +92,23 @@ For larger projects, you can organize your structure in a separate file:
 
 ```typescript
 // sanity.config.ts
-import { defineConfig } from 'sanity';
-import { structureTool } from 'sanity/structure';
+import {defineConfig} from 'sanity'
+import {structureTool} from 'sanity/structure'
 
-import { structure } from './structure';
+import {structure} from './structure'
 
 export default defineConfig({
   plugins: [
-    structureTool({ structure }),
+    structureTool({structure}),
     // ... other plugins
   ],
-});
+})
 ```
 
 ```typescript
 // structure.ts
-import { createBulkActionsTable } from 'sanity-plugin-bulk-table';
-import type { StructureResolver } from 'sanity/structure';
+import {createBulkActionsTable} from 'sanity-plugin-bulk-table'
+import type {StructureResolver} from 'sanity/structure'
 
 export const structure: StructureResolver = (S, context) =>
   S.list()
@@ -118,7 +121,7 @@ export const structure: StructureResolver = (S, context) =>
         title: 'Blog Posts',
       }),
       // ... other items
-    ]);
+    ])
 ```
 
 ### Configuration Options
@@ -127,34 +130,38 @@ The `createBulkActionsTable` function accepts the following options:
 
 ```typescript
 interface CreateBulkActionsTableConfig {
-  type: string; // Required: The document type to display
-  S: StructureBuilder; // Required: Sanity structure builder
-  context: ConfigContext; // Required: Sanity context with client and schema
-  title?: string; // Optional: Custom title for the table view (defaults to document type)
-  icon?: ComponentType | null | undefined; // Optional: Custom icon component for the navigation
-  layout?: 'table' | 'list'; // Optional: 'list' renders a document list instead of a table (defaults to 'table')
-  apiVersion?: string; // Optional: API version for GROQ queries (defaults to context version)
+  type: string // Required: The document type to display
+  S: StructureBuilder // Required: Sanity structure builder
+  context: ConfigContext // Required: Sanity context with client and schema
+  title?: string // Optional: Custom title for the table view (defaults to document type)
+  icon?: ComponentType | null | undefined // Optional: Custom icon component for the navigation
+  layout?: 'table' | 'list' // Optional: 'list' renders a document list instead of a table (defaults to 'table')
+  languages?: string[] // Optional: language codes of the document's internationalizedArray* fields
+  labels?: Partial<Labels> // Optional: overrides for the strings the table renders
+  apiVersion?: string // Optional: API version for GROQ queries (defaults to context version)
 }
 ```
 
 #### Configuration Reference
 
-| Parameter    | Type                                 | Required | Default              | Description                                        | Example                             |
-| ------------ | ------------------------------------ | -------- | -------------------- | -------------------------------------------------- | ----------------------------------- |
-| `type`       | `string`                             | ✅ Yes   | -                    | Document schema type name to manage in the table   | `'post'`, `'page'`, `'product'`     |
-| `S`          | `StructureBuilder`                   | ✅ Yes   | -                    | Structure builder instance from structure resolver | Automatically provided by Sanity    |
-| `context`    | `ConfigContext`                      | ✅ Yes   | -                    | Configuration context with client and schema       | Automatically provided by Sanity    |
-| `title`      | `string`                             | ❌ No    | Document type name   | Custom title for Studio navigation                 | `'Blog Posts'`, `'Product Catalog'` |
-| `icon`       | `ComponentType \| null \| undefined` | ❌ No    | Default table icon   | React component for navigation icon                | `DocumentIcon`, `FolderIcon`        |
+| Parameter    | Type                                 | Required | Default              | Description                                                                                                                                | Example                             |
+| ------------ | ------------------------------------ | -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| `type`       | `string`                             | ✅ Yes   | -                    | Document schema type name to manage in the table                                                                                           | `'post'`, `'page'`, `'product'`     |
+| `S`          | `StructureBuilder`                   | ✅ Yes   | -                    | Structure builder instance from structure resolver                                                                                         | Automatically provided by Sanity    |
+| `context`    | `ConfigContext`                      | ✅ Yes   | -                    | Configuration context with client and schema                                                                                               | Automatically provided by Sanity    |
+| `title`      | `string`                             | ❌ No    | Document type name   | Custom title for Studio navigation                                                                                                         | `'Blog Posts'`, `'Product Catalog'` |
+| `icon`       | `ComponentType \| null \| undefined` | ❌ No    | Default table icon   | React component for navigation icon                                                                                                        | `DocumentIcon`, `FolderIcon`        |
 | `layout`     | `'table' \| 'list'`                  | ❌ No    | `'table'`            | `'list'` shows a plain document list with the same selection and bulk actions (no columns, no sorting). Its list item id is `<type>-list`. | `'list'`                            |
-| `apiVersion` | `string`                             | ❌ No    | Client's API version | GROQ API version for queries                       | `'2024-03-12'`, `'2023-05-03'`      |
+| `languages`  | `string[]`                           | ❌ No    | -                    | Language codes of the document's `internationalizedArray*` fields, in display order. Switches on the language controls described below.     | `['en', 'de']`                      |
+| `labels`     | `Partial<Labels>`                    | ❌ No    | `LABELS`             | Overrides for the strings the table renders; the rest fall back to the English defaults.                                                    | `{create: 'New product'}`           |
+| `apiVersion` | `string`                             | ❌ No    | Client's API version | GROQ API version for queries                                                                                                               | `'2024-03-12'`, `'2023-05-03'`      |
 
 #### Type Definitions
 
 For TypeScript users, you can import the configuration interface:
 
 ```typescript
-import { CreateBulkActionsTableConfig } from 'sanity-plugin-bulk-table';
+import {CreateBulkActionsTableConfig, LABELS, type Labels} from 'sanity-plugin-bulk-table'
 ```
 
 ### Example with Multiple Document Types
@@ -185,10 +192,68 @@ export default defineConfig({
         }),
         S.divider(),
         // ... other structure items
-      ]);
+      ])
   },
-});
+})
 ```
+
+---
+
+## Translated Documents
+
+If a document keeps its texts in `internationalizedArray*` fields
+([sanity-plugin-internationalized-array](https://github.com/sanity-io/sanity-plugin-internationalized-array)),
+pass the language codes and the table learns about them:
+
+```typescript
+createBulkActionsTable({
+  type: 'product',
+  S,
+  context,
+  languages: ['en', 'de', 'fr'],
+})
+```
+
+That turns on:
+
+- a **language picker** in the header — the text columns render that language and sort by it;
+- a **Languages column** with one badge per language: filled when every translatable field of
+  that document has a version in it, outlined when some or none, with the exact percentage
+  under the cursor;
+- a **"Needs translation" filter**, narrowing the list to the documents with nothing written in
+  the chosen language, so the "N items" count answers "how many are left";
+- **search across every language**, not only the chosen one.
+
+Without `languages` the table behaves exactly as it did before: an `internationalizedArray*`
+field would otherwise render as "Untitled" in every row, because its value is an array of
+`{_key, language, value}` rather than a string.
+
+Coverage counts **filled** fields only — an optional description nobody wrote in any language is
+not a missing translation.
+
+---
+
+## Custom Copy
+
+Every string the table renders lives in one object. Pass the ones you want to change:
+
+```typescript
+import {createBulkActionsTable} from 'sanity-plugin-bulk-table'
+
+createBulkActionsTable({
+  type: 'product',
+  S,
+  context,
+  labels: {
+    create: 'New product',
+    items: (count) => (count === 1 ? '1 product' : `${count} products`),
+  },
+})
+```
+
+The defaults are exported as `LABELS` (typed `Labels`), so a full translation is
+`labels: {...myPolishLabels}` and a partial one only overrides what it lists. The copy inside the
+bulk-action confirmation dialogs is not part of `labels` yet.
 
 ---
 
@@ -212,7 +277,7 @@ Powerful search capabilities across your document fields:
 - **Real-Time Results**: Results update instantly as you type
 - **Smart Matching**: Uses partial matching with wildcard support for flexible searches
 - **Field-Specific Search**: Automatically handles different field types (strings, slugs, numbers)
-- **Input Validation**: Built-in sanitization prevents injection attacks and ensures query safety
+- **Parameterized Queries**: The search term is bound as a GROQ parameter, never spliced into the query, so quotes and braces are ordinary characters rather than something to strip
 
 ### ↕️ Flexible Sorting
 

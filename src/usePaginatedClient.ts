@@ -1,70 +1,43 @@
-import { DocumentId, getPublishedId } from '@sanity/id-utils';
-import { SanityClient } from '@sanity/client';
-import { useCallback, useEffect, useState } from 'react';
-import { debounceTime, tap } from 'rxjs/operators';
-import { SanityDocument } from 'sanity';
+import {SanityClient} from '@sanity/client'
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {debounceTime} from 'rxjs/operators'
+import {SanityDocument} from 'sanity'
 
-import { defaultDatetimesObj } from './constants';
-import { ColumnOrder } from './hooks/useStickyStateOrder';
-import { PluginError, handleDataFetchError } from './utils/errorHandling';
+import {defaultDatetimesObj} from './constants'
+import {coverageProjection, i18nOrderKey, isI18nArray} from './helpers/i18n'
+import {buildPageIdsQuery, buildRowsQuery, buildTotalQuery} from './helpers/query'
+import {ResultDocument, publishedIdOf, reduceResults} from './helpers/results'
+import {ColumnOrder} from './hooks/useStickyState'
+import {PluginError, handleDataFetchError} from './utils/errorHandling'
 
-// Strips both the `drafts.` and `versions.<name>.` prefixes, giving the
-// stable id that identifies a document regardless of its draft/version state.
-export const normalizeId = (id: string): string =>
-  getPublishedId(DocumentId(id));
-
-// Builds the single query used to fetch one page of ids directly from the
-// server: it excludes `versions.**` documents, and for any published
-// document that has its own draft, filters out the published copy so each
-// logical document appears exactly once (preferring the draft id). This
-// means paging never needs client-side dedup or sequential batch fetches —
-// offset/limit apply natively via the trailing slice.
-// `start`/`end` are embedded as numeric literals (not bound params) because
-// they're always internally-computed numbers, never user input.
-export function buildPageIdsQuery(
-  searchQuery: string,
-  orderQuery: string,
-  start: number,
-  end: number,
-): string {
-  return (
-    `*[_type == $type && !(_id in path("versions.**")) && ` +
-    `(_id in path("drafts.**") || !defined(*[_id == "drafts." + ^._id][0]._id))` +
-    `${searchQuery}]${orderQuery}[${Math.trunc(start)}...${Math.trunc(end)}]._id`
-  );
-}
-
-type ResultDocument = SanityDocument & {
-  _normalizedId: string;
-  _status: 'published' | 'published_with_pending_changes' | 'draft';
-};
-
-// Same as ResultDocument, plus the `_lastPublishedAt` field the results
-// reducer below computes (used by the `_lastPublishedAt` column only).
-type IndexedResultDocument = ResultDocument & {
-  _lastPublishedAt: string | null;
-};
+export type {ResultDocument}
 
 export interface PaginatedClient {
-  results: ResultDocument[];
-  page: number;
-  totalPages: number;
-  setPage: (page: number) => void;
-  loading: boolean;
-  pageIds: string[];
-  total: number;
-  refresh: () => void;
-  setUserQuery: (query: string) => void;
-  error: PluginError | null;
+  results: ResultDocument[]
+  page: number
+  totalPages: number
+  setPage: (page: number) => void
+  loading: boolean
+  total: number
+  refresh: () => void
+  setUserQuery: (query: string) => void
+  error: PluginError | null
 }
 
 interface Params {
-  type: string;
-  pageSize: number;
-  selectedColumns: Set<string>;
-  searchableFields: ((q: string) => string)[];
-  orderColumn: ColumnOrder;
-  client: SanityClient;
+  type: string
+  pageSize: number
+  selectedColumns: Set<string>
+  /** GROQ expressions referring to `$q`, e.g. `title match $q`. */
+  searchableFields: string[]
+  orderColumn: ColumnOrder
+  client: SanityClient
+  /** The language the `internationalizedArray*` columns sort by. */
+  language?: string
+  /** Appended to every filter, `&&` already included (or ''). */
+  extraFilter?: string
+  /** Translatable fields — used to project language coverage onto a row. */
+  i18nFields?: string[]
 }
 
 function usePaginatedClient({
@@ -74,345 +47,202 @@ function usePaginatedClient({
   searchableFields,
   orderColumn,
   client,
+  language = '',
+  extraFilter = '',
+  i18nFields = [],
 }: Params) {
-  // the loading statuses are a set of strings
-  // when it's empty, nothing is loading
-  const [loadingStatuses, setLoadingStatuses] = useState(new Set<string>());
-  const loading = loadingStatuses.size > 0;
+  // A count of in-flight queries, not a set of their names: nobody ever asked
+  // *which* one is loading, and the set version stopped the spinner too early —
+  // two parallel runs of the same effect deleted a single name.
+  const [pending, setPending] = useState(0)
+  const loading = pending > 0
 
-  const [error, setError] = useState<PluginError | null>(null);
+  const [error, setError] = useState<PluginError | null>(null)
+  const [total, setTotal] = useState(0)
+  const totalPages = Math.ceil(total / pageSize)
 
-  // stores the state for the total amount of de-duped documents
-  const [total, setTotal] = useState(0);
+  const [pageIds, setPageIds] = useState<string[]>([])
+  const [page, setPage] = useState(0)
+  const [results, setResults] = useState<ResultDocument[]>([])
 
-  // uses the pageSize to calculate the total pages
-  const totalPages = Math.ceil(total / pageSize);
+  // Bumping the counter runs the effects below once more.
+  const [refreshId, setRefreshId] = useState(0)
+  const refresh = useCallback(() => setRefreshId((n) => n + 1), [])
 
-  // stores the current set of active IDs on the page.
-  // these are fed into the `useEffect` that creates the `results` state
-  const [pageIds, setPageIds] = useState<string[]>([]);
+  const [userQuery, setUserQuery] = useState('')
 
-  // the current page. changing this will trigger a re-fetch of the `pageIds`
-  const [page, setPage] = useState(0);
-
-  // the current result set
-  const [results, setResults] = useState<ResultDocument[]>([]);
-
-  // Refresh mechanism: bumping this counter re-runs the effects below
-  const [refreshId, setRefreshId] = useState(0);
-  const refresh = useCallback(() => setRefreshId((n) => n + 1), []);
-
-  const [userQuery, setUserQuery] = useState('');
-  // Builds the string to use when a custom filter has been entered
+  // The search term goes in as the `$q` parameter instead of being spliced
+  // into the query text. That leaves nothing to "sanitize": a quote, a brace or
+  // a backslash are ordinary characters to GROQ, not syntax. It is what removed
+  // `utils/sanitization.ts` and its blocklist of characters entirely — a
+  // blocklist that also silently ate legitimate search terms.
   const searchQuery =
-    userQuery.length && searchableFields.length
-      ? ` && (${searchableFields.map((fn) => fn(userQuery)).join(' || ')})`
-      : '';
+    (userQuery.length && searchableFields.length ? ` && (${searchableFields.join(' || ')})` : '') +
+    extraFilter
 
-  // Implements ordering from the <th> buttons
-  const orderQuery = orderColumn
-    ? `| order(${orderColumn.key}${orderColumn.type === 'slug' ? '.current' : ''} ${orderColumn.direction})`
-    : ``;
+  const params = useMemo(
+    () => (userQuery.length ? {type, q: `${userQuery}*`} : {type}),
+    [type, userQuery],
+  )
 
-  // get total count
+  // An `internationalizedArray*` column holds every language at once, so it
+  // sorts by the value in the language picked in the header — `order(title
+  // asc)` on the array itself sorts nothing.
+  const orderKey =
+    orderColumn.key && isI18nArray(orderColumn.type ?? '')
+      ? i18nOrderKey(orderColumn.key, language)
+      : `${orderColumn.key}${orderColumn.type === 'slug' ? '.current' : ''}`
+
+  const orderQuery = orderColumn.key ? `| order(${orderKey} ${orderColumn.direction})` : ``
+
+  // The item count
   useEffect(() => {
-    let canceled = false;
+    let canceled = false
+    setPending((n) => n + 1)
 
-    async function getTotalCount() {
-      setLoadingStatuses((prev) => {
-        const next = new Set(prev);
-        next.add('total_count');
-        return next;
-      });
+    client
+      .fetch<number>(buildTotalQuery(searchQuery), params)
+      .then((count) => {
+        if (canceled) return
+        setTotal(count)
+        setError(null)
+      })
+      .catch((e: unknown) => {
+        if (!canceled) setError(handleDataFetchError(e, 'item count'))
+      })
+      .finally(() => setPending((n) => n - 1))
 
-      try {
-        // Single round trip: published (non-draft, non-version) count, plus
-        // drafts that have no published counterpart (a join expressed via
-        // `^._id` inside the nested subquery), so nothing over-counts
-        // `versions.**` documents and no id list needs to travel over the wire.
-        const { notDraftCount, draftOnlyCount } = await client.fetch<{
-          notDraftCount: number;
-          draftOnlyCount: number;
-        }>(
-          `{
-            "notDraftCount": count(*[_type == $type && !(_id in path("drafts.**")) && !(_id in path("versions.**")) ${searchQuery}]),
-            "draftOnlyCount": count(*[_type == $type && _id in path("drafts.**") ${searchQuery} && !defined(*[_id == string::split(^._id, "drafts.")[1]][0])])
-          }`,
-          { type },
-        );
+    return () => {
+      canceled = true
+    }
+  }, [client, params, refreshId, searchQuery])
 
-        if (canceled) return;
+  // The ids on the current page
+  useEffect(() => {
+    let canceled = false
+    setPending((n) => n + 1)
 
-        setTotal(notDraftCount + draftOnlyCount);
-        setError(null);
-      } catch (e) {
-        const pluginError = handleDataFetchError(e, 'getting total count');
-        if (!canceled) setError(pluginError);
-      } finally {
-        if (!canceled) {
-          setLoadingStatuses((prev) => {
-            const next = new Set(prev);
-            next.delete('total_count');
-            return next;
-          });
-        }
-      }
+    const start = page * pageSize
+
+    client
+      .fetch<string[]>(buildPageIdsQuery(searchQuery, orderQuery, start, start + pageSize), params)
+      .then((rawIds) => {
+        if (canceled) return
+        const ids = rawIds.map(publishedIdOf)
+        // The same array as last time stays the same array: a refresh that
+        // added nothing and reordered nothing has no reason to tear down the
+        // `listen` subscription and re-fetch the rows.
+        setPageIds((prev) =>
+          prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids,
+        )
+        setError(null)
+      })
+      .catch((e: unknown) => {
+        if (!canceled) setError(handleDataFetchError(e, 'item list'))
+      })
+      .finally(() => setPending((n) => n - 1))
+
+    return () => {
+      canceled = true
+    }
+  }, [client, page, pageSize, params, refreshId, searchQuery, orderQuery])
+
+  // The row contents. `searchQuery`/`orderQuery` are deliberately NOT here:
+  // `pageIds` has already been through both on the server, and the order is
+  // restored by `reduceResults` anyway.
+  const fetchResults = useCallback(async () => {
+    if (!pageIds.length) {
+      setResults([])
+      return
     }
 
-    void getTotalCount();
-
-    return () => {
-      canceled = true;
-    };
-  }, [client, type, refreshId, searchQuery]);
-
-  // get page IDs
-  useEffect(() => {
-    let canceled = false;
-
-    const getPageIds = async (targetPage: number) => {
-      setLoadingStatuses((prev) => {
-        const next = new Set(prev);
-        next.add('page_ids');
-        return next;
-      });
-
-      try {
-        // Single round trip: the query already dedupes drafts/published
-        // pairs and excludes `versions.**` server-side, so offset/limit
-        // apply directly — no client-side dedup or batching needed.
-        const start = targetPage * pageSize;
-        const rawIds = await client.fetch<string[]>(
-          buildPageIdsQuery(searchQuery, orderQuery, start, start + pageSize),
-          { type },
-        );
-
-        return rawIds.map(normalizeId);
-      } finally {
-        if (!canceled) {
-          setLoadingStatuses((prev) => {
-            const next = new Set(prev);
-            next.delete('page_ids');
-            return next;
-          });
-        }
-      }
-    };
-
-    getPageIds(page)
-      .then((ids) => {
-        if (!canceled) {
-          // Keep the previous array reference when the id list is
-          // unchanged (e.g. a manual refresh() that didn't add, remove, or
-          // reorder any documents on this page), so the results effect
-          // below - and its client.listen subscription - doesn't tear down
-          // and re-run just because a new (but equal) array was set.
-          setPageIds((prev) =>
-            prev.length === ids.length && prev.every((id, i) => id === ids[i])
-              ? prev
-              : ids,
-          );
-          setError(null);
-        }
-        return;
-      })
-      .catch((e) => {
-        const pluginError = handleDataFetchError(e, 'fetching page IDs');
-        if (!canceled) setError(pluginError);
-      });
-
-    return () => {
-      canceled = true;
-    };
-  }, [client, page, pageSize, type, refreshId, searchQuery, orderQuery]);
-
-  // get results
-  useEffect(() => {
-    let canceled = false;
-
-    // take all the input IDs and duplicate them with the prefix `drafts.`
-    const ids = pageIds.flatMap((id) => [id, `drafts.${id}`]);
-    // Inner-object selected keys need to be shaped in the query
-    const columnKeys = Array.from(selectedColumns).map((key: string) =>
+    // Nested fields have to be named in the projection: `"a.b": a.b`.
+    const columnKeys = Array.from(selectedColumns).map((key) =>
       key.includes('.') ? `"${key}": ${key}` : key,
-    );
+    )
 
     if (
       !columnKeys.includes(defaultDatetimesObj._updatedAt.key) &&
       columnKeys.includes(defaultDatetimesObj._lastPublishedAt.key)
     ) {
-      columnKeys.push(defaultDatetimesObj._updatedAt.key);
+      columnKeys.push(defaultDatetimesObj._updatedAt.key)
     }
 
-    const columnKeysString = columnKeys.join(', ');
+    // Language coverage travels with every row regardless of the chosen
+    // columns: "Languages" is not a column you pick, it is the row's state.
+    const coverage = coverageProjection(i18nFields)
+    const query = buildRowsQuery(columnKeys, coverage)
 
-    // these IDs will go into a specific query. if the draft or published
-    // version happens to not exist, that's okay.
-    // `searchQuery`/`orderQuery` are deliberately NOT applied here:
-    // `pageIds` (and therefore `ids`, derived from it) already went through
-    // both server-side via the page-ids query, and the results below are
-    // re-sorted in JS by `indexes` regardless of query order. Re-applying
-    // them here was pure duplicate work, and - because they're also this
-    // effect's dependencies - made every sort/search change fire this fetch
-    // twice: once with the stale `pageIds` and again once the new ones
-    // arrived from the page-ids effect.
-    const query = `*[_id in $ids]{ _id, _type, ${columnKeysString} }`;
+    const ids = pageIds.flatMap((id) => [id, `drafts.${id}`])
 
-    async function getResults() {
-      setLoadingStatuses((prev) => {
-        const next = new Set(prev);
-        next.add('results');
-        return next;
-      });
-
-      try {
-        // create a dictionary of indexes where the keys are the IDs and the
-        // values are the current index. this dictionary will be used to sort the
-        // documents in their original order
-        const indexes = pageIds.reduce<{ [id: string]: number }>(
-          (acc, id, index) => {
-            acc[id] = index;
-            return acc;
-          },
-          {},
-        );
-
-        const newResults = await client.fetch<SanityDocument[]>(query, {
-          ids,
-        });
-
-        // reduce the results into an accumulator by their normalized ID.
-        // if there is a draft version, prefer the draft over the published
-        const reducedResults = Object.values(
-          newResults.reduce<{ [id: string]: IndexedResultDocument }>(
-            (acc, next) => {
-              const id = normalizeId(next._id);
-              const preceding = acc[id];
-
-              const precedingIsDraft = preceding?._id.startsWith('drafts.');
-              const nextIsDraft = next?._id.startsWith('drafts.');
-
-              const status = preceding
-                ? 'published_with_pending_changes'
-                : nextIsDraft
-                  ? 'draft'
-                  : 'published';
-
-              const base = precedingIsDraft ? preceding : next;
-
-              const lastPublishedAt =
-                orderColumn.key === '_updatedAt' &&
-                orderColumn.direction === 'desc'
-                  ? nextIsDraft
-                    ? null
-                    : next._updatedAt
-                  : preceding
-                    ? preceding._updatedAt
-                    : nextIsDraft
-                      ? null
-                      : next._updatedAt;
-
-              acc[id] = {
-                ...base,
-                _status: status,
-                _normalizedId: id,
-                _lastPublishedAt: lastPublishedAt,
-              };
-
-              return acc;
-            },
-            {},
-          ),
-        );
-
-        if (canceled) return;
-
-        setResults(
-          reducedResults
-            .slice()
-            // sort the accumulated version by their original index
-            .sort(
-              (a: SanityDocument, b: SanityDocument) =>
-                indexes[normalizeId(a._id)] - indexes[normalizeId(b._id)],
-            ),
-        );
-        setError(null);
-      } catch (e) {
-        const pluginError = handleDataFetchError(e, 'fetching results');
-        if (!canceled) setError(pluginError);
-      } finally {
-        if (!canceled) {
-          setLoadingStatuses((prev) => {
-            const next = new Set(prev);
-            next.delete('results');
-            return next;
-          });
-        }
-      }
+    setPending((n) => n + 1)
+    try {
+      const documents = await client.fetch<SanityDocument[]>(query, {ids})
+      setResults(reduceResults(documents, pageIds))
+      setError(null)
+    } catch (e) {
+      setError(handleDataFetchError(e, 'row contents'))
+    } finally {
+      setPending((n) => n - 1)
     }
+  }, [client, pageIds, selectedColumns, i18nFields])
 
-    void getResults();
+  useEffect(() => {
+    void fetchResults()
+  }, [fetchResults, refreshId])
 
-    // Listen only to the documents currently shown on this page (draft +
-    // published variants), instead of the whole type — a page's worth of ids
-    // is small and doesn't need a full-type subscription. A change to one of
-    // these documents triggers a refetch of the same page; it no longer
-    // appends new ids past `pageSize` (a new document should be picked up by
-    // re-paging/refreshing, not by growing this page unbounded).
-    const idsToWatch = pageIds.flatMap((id) => [id, `drafts.${id}`]);
-    if (idsToWatch.length === 0) {
-      return () => {
-        canceled = true;
-      };
-    }
+  // The live listener — its own effect, depending only on the ids being
+  // watched. It used to sit together with the row fetch, so unticking a column
+  // in the menu tore down and reopened the connection to the dataset even
+  // though the set of documents had not changed. The fetching function is
+  // reached through a ref precisely so that changing it doesn't drop the
+  // subscription.
+  const fetchRef = useRef(fetchResults)
+  useEffect(() => {
+    fetchRef.current = fetchResults
+  }, [fetchResults])
+
+  useEffect(() => {
+    if (!pageIds.length) return
+
+    const ids = pageIds.flatMap((id) => [id, `drafts.${id}`])
 
     const subscription = client
-      .listen(`*[_id in $ids]`, { ids: idsToWatch })
-      .pipe(
-        tap(() => {
-          setLoadingStatuses((prev) => {
-            const next = new Set(prev);
-            next.add('results');
-            return next;
-          });
-        }),
-        debounceTime(1000),
-      )
+      .listen(`*[_id in $ids]`, {ids})
+      .pipe(debounceTime(1000))
       .subscribe(() => {
-        void getResults();
-      });
+        void fetchRef.current()
+      })
 
-    return () => {
-      canceled = true;
-      subscription.unsubscribe();
-    };
-  }, [client, pageIds, selectedColumns, refreshId, orderColumn]);
+    return () => subscription.unsubscribe()
+  }, [client, pageIds])
 
-  // Reset the page when totalPages shrinks past it (e.g. pageSize changed,
-  // or the result count dropped). Adjusted during render rather than in an
-  // effect, per https://react.dev/learn/you-might-not-need-an-effect
-  // ("Adjusting state when a prop changes") -- this avoids the extra
-  // render+effect+re-render cascade of doing it after the fact.
-  const [prevTotalPages, setPrevTotalPages] = useState(totalPages);
+  // Step off a page that no longer exists (page size change, a filter, a
+  // deletion). Adjusted during the render rather than in an effect — see
+  // "Adjusting state when a prop changes" in the React docs; an effect would
+  // cost an extra pass.
+  const [prevTotalPages, setPrevTotalPages] = useState(totalPages)
   if (totalPages !== prevTotalPages) {
-    setPrevTotalPages(totalPages);
-    if (page >= totalPages) {
-      setPage(0);
-    }
+    setPrevTotalPages(totalPages)
+    if (page >= totalPages) setPage(0)
   }
 
-  return {
-    results,
-    page,
-    totalPages,
-    setPage,
-    loading,
-    pageIds,
-    total,
-    refresh,
-    setUserQuery,
-    error,
-  };
+  // Memoized because `contextValue` in `context.tsx` lists it as a dependency:
+  // a fresh literal on every render invalidated that `useMemo` every time.
+  return useMemo(
+    () => ({
+      results,
+      page,
+      totalPages,
+      setPage,
+      loading,
+      total,
+      refresh,
+      setUserQuery,
+      error,
+    }),
+    [results, page, totalPages, loading, total, refresh, error],
+  )
 }
 
-export default usePaginatedClient;
+export default usePaginatedClient

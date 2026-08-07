@@ -1,89 +1,32 @@
 /**
- * Error handling utilities for the bulk actions table plugin
+ * The plugin's error handling.
+ *
+ * `PluginError` used to carry `operation` and `documentIds` - fields nobody
+ * ever read. What is left is what actually has an audience: a console entry for
+ * the developer and a message for the editor.
  */
 
 export interface PluginError extends Error {
-  context?: string;
-  operation?: string;
-  documentIds?: string[];
+  context?: string
+}
+
+/** A console entry. A silent failure hides broken data from the user. */
+export function logError(error: unknown, context: string): void {
+  console.error(`[bulk-table] ${context}`, error)
 }
 
 /**
- * Creates a standardized plugin error
+ * A data-fetching error - with a message the table can show.
+ *
+ * Returned rather than thrown: the caller puts it in state so the table can say
+ * "could not load" instead of "no documents".
  */
-export function createPluginError(
-  message: string,
-  context?: string,
-  operation?: string,
-  documentIds?: string[],
-): PluginError {
-  const error = new Error(message) as PluginError;
-  error.context = context;
-  error.operation = operation;
-  error.documentIds = documentIds;
-  return error;
-}
+export function handleDataFetchError(error: unknown, context: string): PluginError {
+  logError(error, context)
 
-/**
- * Logs errors in a consistent format for the plugin
- * In production, this could be enhanced to send to external logging services
- */
-export function logError(error: unknown, context?: string): void {
-  const timestamp = new Date().toISOString();
-  const errorInfo = {
-    timestamp,
-    context,
-    message: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack : undefined,
-    ...(error instanceof Error &&
-      'context' in error && { pluginContext: error.context }),
-    ...(error instanceof Error &&
-      'operation' in error && { operation: error.operation }),
-    ...(error instanceof Error &&
-      'documentIds' in error && { documentIds: error.documentIds }),
-  };
-
-  // Always log — silent failures in production hide broken data fetches from users
-  console.error('[Sanity Bulk Actions Table Plugin] Error:', errorInfo);
-
-  // In production, you might want to send this to an external service
-  // Example: sendToLogService(errorInfo);
-}
-
-/**
- * Handles errors that occur during bulk operations
- */
-export function handleBulkOperationError(
-  error: unknown,
-  operation: string,
-  documentIds?: string[],
-): PluginError {
-  const pluginError = createPluginError(
-    `Bulk ${operation} operation failed`,
-    'BulkActionsMenu',
-    operation,
-    documentIds,
-  );
-
-  logError(error, `Bulk ${operation} operation`);
-
-  return pluginError;
-}
-
-/**
- * Handles errors that occur during data fetching
- */
-export function handleDataFetchError(
-  error: unknown,
-  context: string,
-): PluginError {
-  const pluginError = createPluginError(
-    `Data fetch failed: ${error instanceof Error ? error.message : String(error)}`,
-    context,
-    'fetch',
-  );
-
-  logError(error, context);
-
-  return pluginError;
+  const pluginError = new Error(
+    error instanceof Error ? error.message : String(error),
+  ) as PluginError
+  pluginError.context = context
+  return pluginError
 }

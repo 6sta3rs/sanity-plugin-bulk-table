@@ -1,10 +1,10 @@
-import styled, { css } from 'styled-components';
+import styled, {css} from 'styled-components'
 
-type Tone = 'default' | 'primary';
+type Tone = 'default' | 'primary'
 
 interface SelectableStateColors {
-  bg: string;
-  fg: string;
+  bg: string
+  fg: string
 }
 
 // styled-components' `theme` prop is untyped (`DefaultTheme` is an empty,
@@ -20,27 +20,31 @@ interface SelectableThemeColor {
       selectable: Record<
         Tone,
         {
-          enabled: SelectableStateColors;
-          hovered: SelectableStateColors;
-          selected: SelectableStateColors;
+          enabled: SelectableStateColors
+          hovered: SelectableStateColors
+          selected: SelectableStateColors
         }
-      >;
-    };
-  };
+      >
+    }
+  }
 }
 
 // Table
 export const TablePrimitive = styled.table`
   display: table;
   width: 100%;
-  border-collapse: collapse;
+  /* separate with zero spacing, not collapse: with collapsed borders the
+     header row's line belongs to the table rather than to the sticky thead, so
+     it stayed at the top of the table while the header drew its own - two lines
+     under the header instead of one. */
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
 
   &:not([hidden]) {
     display: table;
-    border-collapse: collapse;
   }
-`;
+`
 
 // Table head
 export const TableHeadPrimitive = styled.thead`
@@ -49,14 +53,14 @@ export const TableHeadPrimitive = styled.thead`
   &:not([hidden]) {
     display: table-header-group;
   }
-`;
+`
 
 // Row
-export const RowPrimitive = styled.tr<{ $tone?: Tone; $selected?: boolean }>(
-  ({ theme, $tone = 'default', $selected }) => {
+export const RowPrimitive = styled.tr<{$tone?: Tone; $selected?: boolean}>(
+  ({theme, $tone = 'default', $selected}) => {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SelectableThemeColor above: styled-components' theme is untyped by default, and @sanity/ui's own typed alternative for this shape is deprecated.
-    const { selectable } = (theme as SelectableThemeColor).sanity.color;
-    const colors = $selected ? selectable[$tone].selected : selectable[$tone].enabled;
+    const {selectable} = (theme as SelectableThemeColor).sanity.color
+    const colors = $selected ? selectable[$tone].selected : selectable[$tone].enabled
 
     return css`
       display: table-row;
@@ -68,12 +72,21 @@ export const RowPrimitive = styled.tr<{ $tone?: Tone; $selected?: boolean }>(
         cursor: pointer;
       }
 
+      /* A row can be opened from the keyboard, so it has to be visible which
+         one has focus. The outline goes inwards because the cells are
+         overflow: hidden and one drawn outside would be clipped. */
+      &:focus-visible {
+        outline: 2px solid currentColor;
+        outline-offset: -2px;
+        background-color: ${selectable[$tone].hovered.bg};
+      }
+
       &:not([hidden]) {
         display: table-row;
       }
-    `;
+    `
   },
-);
+)
 
 // Cell
 export const CellPrimitive = styled.td`
@@ -82,4 +95,4 @@ export const CellPrimitive = styled.td`
   &:not([hidden]) {
     display: table-cell;
   }
-`;
+`

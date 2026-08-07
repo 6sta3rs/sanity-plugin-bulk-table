@@ -1,18 +1,18 @@
-import { SpinnerIcon } from '@sanity/icons/Spinner';
-import { Badge } from '@sanity/ui';
-import styled, { css, keyframes } from 'styled-components';
+import {SpinnerIcon} from '@sanity/icons/Spinner'
+import {Badge} from '@sanity/ui'
+import styled, {css, keyframes} from 'styled-components'
 
-import { CellPrimitive, TablePrimitive } from './table/primitives';
+import {MAX_COLUMN_WIDTH} from './constants'
+import {CellPrimitive, TablePrimitive} from './table/primitives'
 
-export const COLUMN_SELECTOR_WIDTH = '41px';
-export const LIST_STATUS_WIDTH = '28px';
+export const LIST_STATUS_WIDTH = '28px'
 
 // List layout matches Sanity's own document list: a dot on the right edge
 // instead of a badge, so the title keeps the full pane width.
 export const StatusDot = styled.span<{
-  $tone: 'positive' | 'caution' | 'primary';
+  $tone: 'positive' | 'caution' | 'primary'
 }>((props: any) => {
-  const { theme, $tone } = props;
+  const {theme, $tone} = props
 
   return css`
     display: block;
@@ -21,8 +21,8 @@ export const StatusDot = styled.span<{
     height: 8px;
     border-radius: 50%;
     background-color: ${theme.sanity.color.muted[$tone].enabled.fg};
-  `;
-});
+  `
+})
 
 export const Container = styled.div`
   height: 100%;
@@ -30,7 +30,7 @@ export const Container = styled.div`
   overflow: hidden;
   display: flex;
   flex-direction: column;
-`;
+`
 
 export const StatusBadge = styled(Badge)`
   text-transform: capitalize;
@@ -49,30 +49,33 @@ export const StatusBadge = styled(Badge)`
       overflow: clip;
     }
   }
-`;
+`
 
-export const TableWrapper = styled.div<{ $hasResults: boolean }>`
-  container-type: inline-size;
-  ${({ $hasResults }) =>
-    $hasResults
-      ? css`
-          overflow: auto;
-          position: relative;
-          padding-bottom: 41px;
-          flex-grow: 1;
-          flex-shrink: 1;
-          flex-basis: 0;
-        `
-      : css`
-          overflow: auto;
-          position: relative;
-          padding-bottom: 41px;
-        `}
-`;
+export const TableWrapper = styled.div<{
+  $hasResults: boolean
+  $panning?: boolean
+}>`
+  overflow: auto;
+  position: relative;
+  /* The footer is an ordinary layout element, so there is no space to reserve
+     underneath it — that used to be a padding-bottom: 41px tuned to its
+     height. */
+  ${({$hasResults}) =>
+    $hasResults &&
+    css`
+      flex: 1 1 0;
+    `}
+  ${({$panning}) =>
+    $panning &&
+    css`
+      cursor: grabbing;
+      user-select: none;
+    `}
+`
 
-export const LoadingOverlay = styled.div(({ theme }: { theme: any }) => {
-  const { color } = theme.sanity;
-  const background = color.muted.default.disabled.muted.bg;
+export const LoadingOverlay = styled.div(({theme}: {theme: any}) => {
+  const {color} = theme.sanity
+  const background = color.muted.default.disabled.muted.bg
 
   return css`
     position: absolute;
@@ -90,8 +93,8 @@ export const LoadingOverlay = styled.div(({ theme }: { theme: any }) => {
     &.active {
       opacity: 0.5;
     }
-  `;
-});
+  `
+})
 
 export const spin = keyframes`
   from {
@@ -100,7 +103,7 @@ export const spin = keyframes`
   to {
     transform: rotate(360deg);
   }
-`;
+`
 
 export const LoadingSpinner = styled(SpinnerIcon)`
   margin: auto;
@@ -113,84 +116,32 @@ export const LoadingSpinner = styled(SpinnerIcon)`
   ${LoadingOverlay}:not(.active) & {
     animation-play-state: paused;
   }
-`;
+`
 
-export const Table = styled(TablePrimitive)<{ $list?: boolean }>((props: any) => {
-  const { theme, $list } = props;
-  const { color } = theme.sanity;
-  const borderColor = color.selectable.default.enabled.border;
+export const Table = styled(TablePrimitive)<{
+  $list?: boolean
+  $full?: boolean
+  $maxColumnWidth?: number
+  $dense?: boolean
+}>((props: any) => {
+  const {theme, $list, $full, $dense} = props
+  const maxColumnWidth = `${props.$maxColumnWidth ?? MAX_COLUMN_WIDTH}px`
+  const {color} = theme.sanity
+  const borderColor = color.selectable.default.enabled.border
 
   return css`
-    /* Progressive width-based column hiding */
-    @container (max-width: 600px) {
-      col:nth-child(n + 6),
-      th:nth-child(n + 6),
-      td:nth-child(n + 6) {
-        display: none;
-      }
-    }
+    /* No hiding of columns by ordinal position here.
+       There used to be four width breakpoints hiding nth-child(n + N), plus the
+       same block written out a second time under @supports not. The ordinal
+       shifted along with the selection column and the "Languages" column, so
+       the same breakpoint hid something different every time — with no trace
+       that anything had gone. A narrow pane scrolls sideways instead; which
+       columns to show is the editor's call. */
 
-    @container (max-width: 500px) {
-      col:nth-child(n + 5),
-      th:nth-child(n + 5),
-      td:nth-child(n + 5) {
-        display: none;
-      }
-    }
-
-    @container (max-width: 400px) {
-      col:nth-child(n + 4),
-      th:nth-child(n + 4),
-      td:nth-child(n + 4) {
-        display: none;
-      }
-    }
-
-    @container (max-width: 300px) {
-      col:nth-child(n + 3),
-      th:nth-child(n + 3),
-      td:nth-child(n + 3) {
-        display: none;
-      }
-    }
-
-    /* Fallback for browsers without container query support */
-    @supports not (container-type: inline-size) {
-      @media (max-width: 600px) {
-        col:nth-child(n + 6),
-        th:nth-child(n + 6),
-        td:nth-child(n + 6) {
-          display: none;
-        }
-      }
-
-      @media (max-width: 500px) {
-        col:nth-child(n + 5),
-        th:nth-child(n + 5),
-        td:nth-child(n + 5) {
-          display: none;
-        }
-      }
-
-      @media (max-width: 400px) {
-        col:nth-child(n + 4),
-        th:nth-child(n + 4),
-        td:nth-child(n + 4) {
-          display: none;
-        }
-      }
-
-      @media (max-width: 300px) {
-        col:nth-child(n + 3),
-        th:nth-child(n + 3),
-        td:nth-child(n + 3) {
-          display: none;
-        }
-      }
-    }
-
+    /* Rows only as tall as a thumbnail and two lines of preview need — the
+       rest of the height was padding. */
     .preview-root {
-      padding: 0.25rem 0;
+      padding: 0;
       margin-right: -0.75rem;
     }
 
@@ -210,26 +161,41 @@ export const Table = styled(TablePrimitive)<{ $list?: boolean }>((props: any) =>
       position: sticky;
       top: 0;
       z-index: 1;
+      /* The header has to be opaque: scrolled rows passed underneath it and
+         their letters overlapped the column names. The row background is the
+         fallback, because the shape of the Studio theme changed between
+         @sanity/ui versions and an undefined colour means a transparent header
+         all over again. */
+      background-color: ${color.base?.bg ?? color.selectable.default.enabled.bg};
     }
 
     th {
-      padding: 0.4rem 0.5rem;
-    }
-
-    th::after {
-      position: absolute;
-      content: ' ';
-      left: 0;
-      right: 0;
-      bottom: 0;
-      top: 0;
-      border-bottom: 1px solid ${borderColor};
-      pointer-events: none;
+      padding: 0.3rem 0.5rem;
+      position: relative;
+      /* One line under the header, drawn as an inset shadow.
+         It used to be a pseudo-element stretched across the cell, and with a
+         sticky header that produced two lines: its own and the one under the
+         first row. A shadow takes up no space in the layout, so there is
+         nothing to double. */
+      box-shadow: inset 0 -1px 0 ${borderColor};
     }
 
     td,
     th {
       text-align: left;
+      /* table-layout: fixed doesn't widen a column for longer text — without
+         truncation the content leaves its cell and paints over the next one.
+         That is the overlapping title and slug. */
+      overflow: hidden;
+    }
+
+    /* An ellipsis only works when the element has something to truncate
+       against: in the cell (block) and in the flex item (min-width, because the
+       default auto refuses to shrink below the content width). */
+    td > *,
+    th > * {
+      max-width: 100%;
+      min-width: 0;
     }
 
     th.title-cell,
@@ -238,44 +204,86 @@ export const Table = styled(TablePrimitive)<{ $list?: boolean }>((props: any) =>
     }
 
     td {
-      padding: 0 0.5rem;
+      padding: 0.125rem 0.5rem;
       border-bottom: 1px solid ${borderColor};
     }
 
+    /* "Full width columns" mode: every column as wide as its content needs,
+       and the table wider than the pane — for reading it like a spreadsheet.
+       The default is the opposite: columns share the space evenly and text is
+       truncated, because that shows the most rows at once. */
+    ${
+      $full &&
+      css`
+        table-layout: auto;
+        width: max-content;
+        min-width: 100%;
+
+        td,
+        th {
+          overflow: hidden;
+          white-space: nowrap;
+          max-width: ${maxColumnWidth};
+        }
+
+        /* A column grows to its content but no further than the limit — longer
+         text gets an ellipsis instead of stretching the table across several
+         screens. */
+        td > *,
+        th > * {
+          max-width: ${maxColumnWidth};
+        }
+
+        .preview-title,
+        .preview-subtitle {
+          white-space: nowrap;
+        }
+      `
+    }
+
+    /* Denser rows: more items on screen at the cost of the thumbnails. */
+    ${
+      $dense &&
+      css`
+        td {
+          padding: 0 0.5rem;
+        }
+
+        .preview-root {
+          padding: 0;
+        }
+
+        .preview-media,
+        .preview-media img {
+          max-height: 1.5rem;
+        }
+      `
+    }
+
     /* List layout: no dense-table typography, roomier rows. */
-    ${$list &&
-    css`
-      .preview-root {
-        padding: 0.25rem 0;
-        margin-right: 0;
-      }
+    ${
+      $list &&
+      css`
+        .preview-root {
+          padding: 0.25rem 0;
+          margin-right: 0;
+        }
 
-      .preview-title {
-        font-size: inherit;
-      }
+        .preview-title {
+          font-size: inherit;
+        }
 
-      .preview-subtitle {
-        font-size: inherit;
-      }
+        .preview-subtitle {
+          font-size: inherit;
+        }
 
-      td {
-        padding: 0.25rem 0.5rem;
-      }
-    `}
-  `;
-});
-
-export const ColumnSelectHeadCell = styled(CellPrimitive).attrs(() => ({
-  as: 'th',
-}))`
-  width: ${COLUMN_SELECTOR_WIDTH};
-`;
-
-export const ColumnSelectBodyCell = styled(CellPrimitive).attrs(() => ({
-  as: 'td',
-}))`
-  width: ${COLUMN_SELECTOR_WIDTH};
-`;
+        td {
+          padding: 0.25rem 0.5rem;
+        }
+      `
+    }
+  `
+})
 
 export const CheckboxCellTh = styled(CellPrimitive).attrs(() => ({
   as: 'th',
@@ -286,7 +294,7 @@ export const CheckboxCellTh = styled(CellPrimitive).attrs(() => ({
   > * > * {
     margin: auto;
   }
-`;
+`
 
 export const CheckboxCellTd = styled(CellPrimitive).attrs(() => ({
   as: 'td',
@@ -297,14 +305,14 @@ export const CheckboxCellTd = styled(CellPrimitive).attrs(() => ({
   > * > * {
     margin: auto;
   }
-`;
+`
 
 export const CheckboxFacade = styled.div`
   display: flex;
   pointer-events: none;
-`;
+`
 
-export const HiddenCheckbox = styled.input.attrs({ type: 'checkbox' })`
+export const HiddenCheckbox = styled.input.attrs({type: 'checkbox'})`
   height: 100%;
   position: absolute;
   top: 0;
@@ -314,10 +322,10 @@ export const HiddenCheckbox = styled.input.attrs({ type: 'checkbox' })`
   width: 100%;
   opacity: 0;
   cursor: pointer;
-`;
+`
 
 export const IndeterminateIndicator = styled.span`
   font-size: 11px;
   padding-left: 2px;
   padding-right: 2px;
-`;
+`
