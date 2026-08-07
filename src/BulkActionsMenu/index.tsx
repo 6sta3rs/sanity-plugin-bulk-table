@@ -147,6 +147,7 @@ function BulkActionsMenu({onChanged}: Props) {
 
       for (let i = 0; i < actions.length; i += CHUNK_SIZE) {
         const chunk = actions.slice(i, i + CHUNK_SIZE)
+        // oxlint-disable-next-line eslint/no-await-in-loop -- sequential on purpose: `done` has to count the batches that actually went through, so an interrupted run can report how far it got. Promise.all would fire every batch at once and lose that.
         await client.action(chunk)
         done += chunk.length
       }

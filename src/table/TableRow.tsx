@@ -79,7 +79,6 @@ const TableRow = memo(function TableRow({
       // without `tabIndex` and an Enter handler there was no way to open a
       // document other than with the mouse.
       tabIndex={0}
-      role="row"
       aria-selected={isSelectState ? selected : undefined}
       $selected={isOpened}
       $tone={selected ? 'primary' : 'default'}

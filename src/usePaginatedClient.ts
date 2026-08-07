@@ -98,19 +98,22 @@ function usePaginatedClient({
   // The item count
   useEffect(() => {
     let canceled = false
-    setPending((n) => n + 1)
 
-    client
-      .fetch<number>(buildTotalQuery(searchQuery), params)
-      .then((count) => {
+    async function getTotal() {
+      setPending((n) => n + 1)
+      try {
+        const count = await client.fetch<number>(buildTotalQuery(searchQuery), params)
         if (canceled) return
         setTotal(count)
         setError(null)
-      })
-      .catch((e: unknown) => {
+      } catch (e) {
         if (!canceled) setError(handleDataFetchError(e, 'item count'))
-      })
-      .finally(() => setPending((n) => n - 1))
+      } finally {
+        setPending((n) => n - 1)
+      }
+    }
+
+    void getTotal()
 
     return () => {
       canceled = true
@@ -120,13 +123,15 @@ function usePaginatedClient({
   // The ids on the current page
   useEffect(() => {
     let canceled = false
-    setPending((n) => n + 1)
-
     const start = page * pageSize
 
-    client
-      .fetch<string[]>(buildPageIdsQuery(searchQuery, orderQuery, start, start + pageSize), params)
-      .then((rawIds) => {
+    async function getPageIds() {
+      setPending((n) => n + 1)
+      try {
+        const rawIds = await client.fetch<string[]>(
+          buildPageIdsQuery(searchQuery, orderQuery, start, start + pageSize),
+          params,
+        )
         if (canceled) return
         const ids = rawIds.map(publishedIdOf)
         // The same array as last time stays the same array: a refresh that
@@ -136,11 +141,14 @@ function usePaginatedClient({
           prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids,
         )
         setError(null)
-      })
-      .catch((e: unknown) => {
+      } catch (e) {
         if (!canceled) setError(handleDataFetchError(e, 'item list'))
-      })
-      .finally(() => setPending((n) => n - 1))
+      } finally {
+        setPending((n) => n - 1)
+      }
+    }
+
+    void getPageIds()
 
     return () => {
       canceled = true
@@ -188,7 +196,14 @@ function usePaginatedClient({
   }, [client, pageIds, selectedColumns, i18nFields])
 
   useEffect(() => {
-    void fetchResults()
+    // Wrapped rather than called straight: `fetchResults` sets state on its
+    // first statement, and a synchronous setState in an effect body is a
+    // cascading render.
+    async function run() {
+      await fetchResults()
+    }
+
+    void run()
   }, [fetchResults, refreshId])
 
   // The live listener — its own effect, depending only on the ids being
