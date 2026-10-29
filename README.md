@@ -1,7 +1,7 @@
 <div align="center">
   <h1>Sanity Bulk Actions Table Plugin</h1>
   <h3>A powerful table view with bulk actions for managing Sanity documents</h3>
-  <p><em>Maintained by <a href="https://github.com/0x6Star3s" target="_blank">0x6Star3s</a></em></p>
+  <p><em>Maintained by <a href="https://github.com/6sta3rs" target="_blank">Paweł Stach (6sta3rs)</a></em></p>
   <p><em>Based on <a href="https://github.com/contentwrap/sanity-plugin-bulk-actions-table" target="_blank">ContentWrap's plugin</a>, itself forked from <a href="https://github.com/ricokahler/sanity-super-pane" target="_blank">Sanity Super Pane</a></em></p>
 
   <img src="https://img.shields.io/npm/v/sanity-plugin-bulk-table" alt="Sanity Bulk Actions Table" />
@@ -415,4 +415,4 @@ pnpm run build      # @sanity/pkg-utils
 
 ## Issues
 
-If you encounter any issues, please report them on [GitHub Issues](https://github.com/0x6Star3s/sanity-plugin-bulk-table/issues).
+If you encounter any issues, please report them on [GitHub Issues](https://github.com/6sta3rs/sanity-plugin-bulk-table/issues).
