@@ -21,7 +21,7 @@
     "url": "https://github.com/6sta3rs/sanity-plugin-bulk-table/issues"
   },
   "license": "MIT",
-  "author": "Paweł Stach <pawel.stach81@gmail.com>",
+  "author": "Paweł <pawel.stach81@gmail.com>",
   "sideEffects": false,
   "type": "module",
   "scripts": {
